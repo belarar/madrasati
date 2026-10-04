@@ -1,24 +1,38 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   AlertCircle,
   ArrowRightLeft,
+  Bell,
   BookOpen,
   Building,
+  Check,
   CheckCircle2,
+  Copy,
+  Download,
   GraduationCap,
   KeyRound,
   Lock,
   LogIn,
   LogOut,
   Menu,
+  Share2,
   Shield,
+  Smartphone,
+  Sparkles,
   User,
   Users,
   X,
 } from 'lucide-react';
 import { MOCK_USERS, SCHOOL_NAME } from '../data/mockData';
-import { setCurrentUser, updateCurrentUserPassword } from '../services/storageService';
-import { UserProfile, UserRole } from '../types';
+import {
+  getNotifications,
+  getUnreadNotificationsCount,
+  setCurrentUser,
+  updateCurrentUserPassword,
+} from '../services/storageService';
+import { AppNotification, UserProfile, UserRole } from '../types';
+import { NotificationsModal } from './common/NotificationsModal';
+import { PwaInstallModal } from './common/PwaInstallModal';
 
 interface NavbarProps {
   currentUser: UserProfile | null;
@@ -30,11 +44,54 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   const [showSwitchMenu, setShowSwitchMenu] = useState(false);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
+  // Notifications Modal State
+  const [notificationsOpen, setNotificationsOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => getNotifications());
+  const [unreadCount, setUnreadCount] = useState<number>(0);
+
+  // PWA Install State
+  const [pwaModalOpen, setPwaModalOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+
+  // Share Toast State
+  const [copiedShare, setCopiedShare] = useState(false);
+
   // Staff password update modal state
   const [showPasswordModal, setShowPasswordModal] = useState(false);
   const [newPasswordInput, setNewPasswordInput] = useState('');
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [pwdMsg, setPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
+
+  // Sync notifications on mount & event
+  useEffect(() => {
+    const updateNotifs = () => {
+      const list = getNotifications();
+      setNotifications(list);
+      setUnreadCount(getUnreadNotificationsCount(currentUser?.identifier));
+    };
+
+    updateNotifs();
+    window.addEventListener('notifications-change', updateNotifs);
+
+    // Capture PWA install prompt
+    const handleBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
+    return () => {
+      window.removeEventListener('notifications-change', updateNotifs);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
+    };
+  }, [currentUser]);
+
+  const handleCopyCleanLink = () => {
+    const cleanUrl = window.location.origin;
+    navigator.clipboard.writeText(cleanUrl);
+    setCopiedShare(true);
+    setTimeout(() => setCopiedShare(false), 2500);
+  };
 
   const handleUpdatePassword = (e: React.FormEvent) => {
     e.preventDefault();
@@ -134,7 +191,50 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
           </div>
 
           {/* Center/Right Actions */}
-          <div className="flex items-center gap-2 sm:gap-3">
+          <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* 1. Notifications Bell Button */}
+            <button
+              onClick={() => setNotificationsOpen(true)}
+              className="relative p-2.5 rounded-xl bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-900 border border-slate-200 transition-all shadow-2xs active:scale-95"
+              title="الإشعارات والتنبيهات المدرسية"
+            >
+              <Bell className="w-4 h-4 text-emerald-800" />
+              {unreadCount > 0 && (
+                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-rose-600 text-white rounded-full text-[10px] font-bold flex items-center justify-center animate-pulse shadow-xs">
+                  {unreadCount > 9 ? '+9' : unreadCount}
+                </span>
+              )}
+            </button>
+
+            {/* 2. PWA Install App Button */}
+            <button
+              onClick={() => setPwaModalOpen(true)}
+              className="hidden sm:flex items-center gap-1.5 px-3 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100/90 text-emerald-800 text-xs font-bold border border-emerald-300 transition-all shadow-2xs active:scale-95"
+              title="تثبيت المنصة كتطبيق على الهاتف"
+            >
+              <Smartphone className="w-3.5 h-3.5 text-emerald-700" />
+              <span>تثبيت التطبيق</span>
+            </button>
+
+            {/* 3. Share Clean Public Link Button */}
+            <button
+              onClick={handleCopyCleanLink}
+              className="flex items-center gap-1.5 px-3 py-2 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 transition-all shadow-2xs active:scale-95"
+              title="نسخ ومشاركة رابط المنصة النظيف دون فتح حسابك للآخرين"
+            >
+              {copiedShare ? (
+                <>
+                  <Check className="w-3.5 h-3.5 text-emerald-600" />
+                  <span className="text-emerald-700 font-bold">تم نسخ الرابط!</span>
+                </>
+              ) : (
+                <>
+                  <Share2 className="w-3.5 h-3.5 text-slate-600" />
+                  <span className="hidden md:inline">مشاركة الرابط</span>
+                </>
+              )}
+            </button>
+
             {/* Role Switcher / Login Action */}
             <button
               onClick={onOpenLogin}
@@ -142,7 +242,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
               title="دخول تلميذ جديد أو موظف"
             >
               <ArrowRightLeft className="w-3.5 h-3.5 text-emerald-700" />
-              <span>دخول / تبديل الحساب</span>
+              <span>{currentUser ? 'تبديل الحساب' : 'تسجيل الدخول'}</span>
             </button>
 
             {/* Current User Badge */}
@@ -292,6 +392,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
           </div>
         </div>
       )}
+
+      {/* Notifications Modal */}
+      <NotificationsModal
+        isOpen={notificationsOpen}
+        onClose={() => setNotificationsOpen(false)}
+        notifications={notifications}
+        currentUser={currentUser}
+      />
+
+      {/* PWA Mobile Installation Modal */}
+      <PwaInstallModal
+        isOpen={pwaModalOpen}
+        onClose={() => setPwaModalOpen(false)}
+        installPromptEvent={deferredPrompt}
+      />
     </header>
   );
 };

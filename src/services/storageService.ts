@@ -7,6 +7,7 @@ import {
   SCHOOL_NAME,
 } from '../data/mockData';
 import {
+  AppNotification,
   DocType,
   FileFormat,
   ParentSummon,
@@ -28,11 +29,18 @@ const STORAGE_KEYS = {
   SUMMONS: 'ben_naama_summons',
   USERS: 'ben_naama_users',
   PEER_EXCHANGES: 'ben_naama_peer_exchanges',
+  NOTIFICATIONS: 'ben_naama_notifications',
 };
 
-const CLEAN_VERSION_KEY = 'ben_naama_strict_official_v14';
+const CLEAN_VERSION_KEY = 'ben_naama_strict_official_v16';
 
-// Initialize Storage with clean baseline
+// In-memory cache for live cross-device sync and local quota protection
+let cachedDocuments: SchoolDocument[] | null = null;
+let cachedAnnouncements: SchoolAnnouncement[] | null = null;
+let cachedSummons: ParentSummon[] | null = null;
+let cachedPeerExchanges: PeerExchangePost[] | null = null;
+
+// Initialize Storage with clean baseline & start cross-device sync
 export function initStorage(): void {
   if (typeof window === 'undefined') return;
 
@@ -44,32 +52,25 @@ export function initStorage(): void {
     localStorage.removeItem(STORAGE_KEYS.USERS);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
     localStorage.removeItem(STORAGE_KEYS.PEER_EXCHANGES);
+    localStorage.removeItem(STORAGE_KEYS.NOTIFICATIONS);
     localStorage.setItem(CLEAN_VERSION_KEY, 'true');
   }
 
-  if (!localStorage.getItem(STORAGE_KEYS.DOCUMENTS)) {
-    localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(INITIAL_DOCUMENTS));
-  }
+  // Populate cache on startup
+  cachedDocuments = getDocuments();
+  cachedAnnouncements = getAnnouncements();
+  cachedSummons = getSummons();
+  cachedPeerExchanges = getPeerExchanges();
 
-  if (!localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS)) {
-    localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(INITIAL_ANNOUNCEMENTS));
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.SUMMONS)) {
-    localStorage.setItem(STORAGE_KEYS.SUMMONS, JSON.stringify(INITIAL_SUMMONS));
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.USERS)) {
-    localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(MOCK_USERS));
-  }
-
-  if (!localStorage.getItem(STORAGE_KEYS.PEER_EXCHANGES)) {
-    localStorage.setItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(INITIAL_PEER_EXCHANGES));
-  }
-
-  // Default initial user: Director (السيد عدة عمار عبد القادر)
-  if (!localStorage.getItem(STORAGE_KEYS.CURRENT_USER)) {
-    localStorage.setItem(STORAGE_KEYS.CURRENT_USER, JSON.stringify(MOCK_USERS[0]));
+  // Start real-time server synchronization across devices
+  syncWithServer();
+  if (!(window as any).__benNaamaSyncInterval) {
+    (window as any).__benNaamaSyncInterval = setInterval(syncWithServer, 2500);
+    window.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') {
+        syncWithServer();
+      }
+    });
   }
 }
 
@@ -77,10 +78,10 @@ export function initStorage(): void {
 export function getCurrentUser(): UserProfile | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
-    if (!raw) return MOCK_USERS[0];
+    if (!raw) return null; // Clean guest state - user must log in
     return JSON.parse(raw);
   } catch {
-    return MOCK_USERS[0];
+    return null;
   }
 }
 
@@ -380,35 +381,22 @@ export function safeSetItem(key: string, value: string): boolean {
     localStorage.setItem(key, value);
     return true;
   } catch (err: unknown) {
-    const isQuotaError =
-      err instanceof DOMException &&
-      (err.code === 22 ||
-        err.code === 1014 ||
-        err.name === 'QuotaExceededError' ||
-        err.name === 'NS_ERROR_DOM_QUOTA_REACHED');
-
-    if (isQuotaError) {
-      console.warn(`[Storage] مساحة التخزين ممتلئة للمفتاح ${key}. يتم تنظيف المرفقات القديمة للحفاظ على الاستقرار.`);
-      // If quota exceeded, try to prune the oldest entries with large dataUrl
-      try {
-        const raw = localStorage.getItem(key);
-        if (raw) {
-          const parsed = JSON.parse(raw);
-          if (Array.isArray(parsed) && parsed.length > 5) {
-            // Keep recent 10 items, remove bulky fileDataUrl from older ones
-            const trimmed = parsed.slice(0, 15).map((item, idx) => {
-              if (idx > 4 && item.fileDataUrl) {
-                return { ...item, fileDataUrl: undefined };
-              }
-              return item;
-            });
-            localStorage.setItem(key, JSON.stringify(trimmed));
-            return true;
+    console.warn(`[Storage] مساحة التخزين ممتلئة للمفتاح ${key}. يتم تنظيف المرفقات للحفاظ على الاستقرار.`);
+    try {
+      const parsed = JSON.parse(value);
+      if (Array.isArray(parsed)) {
+        // Strip heavy base64 strings to stay within quota on mobile phones
+        const trimmed = parsed.map(item => {
+          if (item && item.fileDataUrl && item.fileDataUrl.length > 2000) {
+            return { ...item, fileDataUrl: undefined };
           }
-        }
-      } catch {
-        // Ignored
+          return item;
+        });
+        localStorage.setItem(key, JSON.stringify(trimmed));
+        return true;
       }
+    } catch {
+      // Ignored
     }
     return false;
   }
@@ -416,10 +404,15 @@ export function safeSetItem(key: string, value: string): boolean {
 
 // Documents
 export function getDocuments(): SchoolDocument[] {
+  if (cachedDocuments && cachedDocuments.length > 0) {
+    return cachedDocuments;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.DOCUMENTS);
     if (!raw) return INITIAL_DOCUMENTS;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    cachedDocuments = parsed;
+    return parsed;
   } catch {
     return INITIAL_DOCUMENTS;
   }
@@ -432,92 +425,80 @@ export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'do
     id: 'doc-' + Date.now(),
     uploadDate: new Date().toISOString(),
     downloadCount: 0,
+    targetClasses: Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 ? doc.targetClasses : ['ALL'],
   };
 
-  const updated = [newDoc, ...docs];
+  const updated = [newDoc, ...docs.filter(d => d.id !== newDoc.id)];
+  cachedDocuments = updated;
   safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
+
+  // Sync to backend across all devices
+  fetch('/api/documents', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newDoc),
+  }).catch(err => console.debug('[Sync] Document post err:', err));
+
   return newDoc;
 }
 
 export function deleteDocument(docId: string): void {
   const docs = getDocuments();
   const updated = docs.filter(d => d.id !== docId);
-  localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
+  cachedDocuments = updated;
+  safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
+
+  fetch('/api/documents/' + encodeURIComponent(docId), {
+    method: 'DELETE',
+  }).catch(() => {});
 }
 
 export function incrementDownloadCount(docId: string): void {
   const docs = getDocuments();
-  const updated = docs.map(d => (d.id === docId ? { ...d, downloadCount: d.downloadCount + 1 } : d));
-  localStorage.setItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
+  const updated = docs.map(d => (d.id === docId ? { ...d, downloadCount: (d.downloadCount || 0) + 1 } : d));
+  cachedDocuments = updated;
+  safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
 }
 
-// Real downloadable file generator
+// Real downloadable file generator & streaming server downloader
 export function downloadFile(doc: SchoolDocument): void {
   incrementDownloadCount(doc.id);
 
-  // If doc has explicit data URL, use it
-  if (doc.fileDataUrl) {
+  // 1. If doc has explicit data URL in memory
+  if (doc.fileDataUrl && doc.fileDataUrl.startsWith('data:')) {
     const a = document.createElement('a');
     a.href = doc.fileDataUrl;
-    a.download = doc.fileName || `${doc.title}.${doc.fileFormat}`;
+    a.download = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
     return;
   }
 
-  // Otherwise generate a formatted mock file blob with rich Arabic contents
-  let mimeType = 'text/plain;charset=utf-8';
-  let fileExtension = doc.fileFormat;
-
-  if (doc.fileFormat === 'pdf') {
-    mimeType = 'application/pdf';
-  } else if (doc.fileFormat === 'docx' || doc.fileFormat === 'doc') {
-    mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-  }
-
-  const fileContent = `==========================================================
-الجمهورية الجزائرية الديمقراطية الشعبية
-وزارة التربية الوطنية
-${SCHOOL_NAME}
-==========================================================
-
-عنوان الوثيقة: ${doc.title}
-المادة: ${doc.subject}
-النوع: ${doc.docType}
-الأستاذ المشرف: ${doc.authorName}
-تاريخ الرفع: ${new Date(doc.uploadDate).toLocaleDateString('ar-DZ')}
-الفئة المستهدفة: ${doc.targetClasses.join('، ')}
-
-وصف وتعليمات البيداغوجيا:
-${doc.description}
-
-----------------------------------------------------------
-محتوى تجريبي صادر من المنصة الرقمية لمتوسطة الشهيد بن نعمة مصطفى
-يرجى المتابعة وحل التمارين المطلوبة بعناية.
-بالتوفيق لجميع أبنائنا وبناتنا التلاميذ!
-==========================================================`;
-
-  const blob = new Blob([fileContent], { type: mimeType });
-  const url = URL.createObjectURL(blob);
+  // 2. Direct server-side streaming download
+  const serverDownloadUrl = `/api/documents/${encodeURIComponent(doc.id)}/download`;
   const a = document.createElement('a');
-  a.href = url;
-  a.download = doc.fileName || `${doc.title}.${fileExtension}`;
+  a.href = serverDownloadUrl;
+  a.download = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 // Announcements
 export function getAnnouncements(): SchoolAnnouncement[] {
+  if (cachedAnnouncements && cachedAnnouncements.length > 0) {
+    return cachedAnnouncements;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
     if (!raw) return INITIAL_ANNOUNCEMENTS;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    cachedAnnouncements = parsed;
+    return parsed;
   } catch {
     return INITIAL_ANNOUNCEMENTS;
   }
@@ -532,25 +513,43 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
     views: 1,
   };
 
-  const updated = [newAnn, ...anns];
-  localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
+  const updated = [newAnn, ...anns.filter(a => a.id !== newAnn.id)];
+  cachedAnnouncements = updated;
+  safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
+
+  fetch('/api/announcements', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newAnn),
+  }).catch(() => {});
+
   return newAnn;
 }
 
 export function deleteAnnouncement(annId: string): void {
   const anns = getAnnouncements();
   const updated = anns.filter(a => a.id !== annId);
-  localStorage.setItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
+  cachedAnnouncements = updated;
+  safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
+
+  fetch('/api/announcements/' + encodeURIComponent(annId), {
+    method: 'DELETE',
+  }).catch(() => {});
 }
 
 // Summons (الاستدعاءات)
 export function getSummons(): ParentSummon[] {
+  if (cachedSummons) {
+    return cachedSummons;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.SUMMONS);
     if (!raw) return INITIAL_SUMMONS;
-    return JSON.parse(raw);
+    const parsed = JSON.parse(raw);
+    cachedSummons = parsed;
+    return parsed;
   } catch {
     return INITIAL_SUMMONS;
   }
@@ -565,17 +564,38 @@ export function saveSummon(summon: Omit<ParentSummon, 'id' | 'issuedAt' | 'statu
     status: 'sent',
   };
 
-  const updated = [newSummon, ...summons];
-  localStorage.setItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
+  const updated = [newSummon, ...summons.filter(s => s.id !== newSummon.id)];
+  cachedSummons = updated;
+  safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
   window.dispatchEvent(new Event('summons-change'));
+
+  fetch('/api/summons', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newSummon),
+  }).catch(() => {});
+
   return newSummon;
 }
 
 export function updateSummonStatus(summonId: string, status: ParentSummon['status']): void {
   const summons = getSummons();
   const updated = summons.map(s => (s.id === summonId ? { ...s, status } : s));
-  localStorage.setItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
+  cachedSummons = updated;
+  safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
   window.dispatchEvent(new Event('summons-change'));
+
+  fetch('/api/summons/' + encodeURIComponent(summonId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  }).catch(() => {});
+
+  fetch('/api/summons/' + encodeURIComponent(summonId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  }).catch(() => {});
 }
 
 // Format official WhatsApp message for summons
@@ -859,6 +879,12 @@ export function directResetPassword(
   setCurrentUser(targetUser);
   window.dispatchEvent(new Event('auth-change'));
 
+  fetch('/api/users/update-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: targetUser.identifier, pin: cleanPass }),
+  }).catch(() => {});
+
   return {
     success: true,
     message: 'تم تحديث كلمة السر بنجاح (4 خانات فما فوق)! تم تسجيل دخولك بأمان.',
@@ -884,9 +910,16 @@ export function updateCurrentUserPassword(newPass: string): { success: boolean; 
 // ================= قناة التضامن والتبادل بين تلاميذ القسم =================
 
 export function getPeerExchanges(classId?: string): PeerExchangePost[] {
+  if (cachedPeerExchanges && cachedPeerExchanges.length > 0) {
+    if (classId) {
+      return cachedPeerExchanges.filter(p => p.classId === classId);
+    }
+    return cachedPeerExchanges;
+  }
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.PEER_EXCHANGES);
     const list: PeerExchangePost[] = raw ? JSON.parse(raw) : INITIAL_PEER_EXCHANGES;
+    cachedPeerExchanges = list;
     if (classId) {
       return list.filter(p => p.classId === classId);
     }
@@ -908,9 +941,17 @@ export function savePeerExchange(
     thankedBy: [],
     replies: [],
   };
-  const updated = [newPost, ...current];
+  const updated = [newPost, ...current.filter(p => p.id !== newPost.id)];
+  cachedPeerExchanges = updated;
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(updated));
   window.dispatchEvent(new Event('peer-exchanges-change'));
+
+  fetch('/api/peer-exchanges', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newPost),
+  }).catch(() => {});
+
   return newPost;
 }
 
@@ -919,8 +960,14 @@ export function deletePeerExchange(postId: string): boolean {
   const target = current.find(p => p.id === postId);
   if (!target) return false;
   const updated = current.filter(p => p.id !== postId);
+  cachedPeerExchanges = updated;
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(updated));
   window.dispatchEvent(new Event('peer-exchanges-change'));
+
+  fetch('/api/peer-exchanges/' + encodeURIComponent(postId), {
+    method: 'DELETE',
+  }).catch(() => {});
+
   return true;
 }
 
@@ -938,8 +985,16 @@ export function thankPeerExchange(postId: string, studentId: string): PeerExchan
       : [...post.thankedBy, studentId],
   };
   current[idx] = updatedPost;
+  cachedPeerExchanges = current;
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(current));
   window.dispatchEvent(new Event('peer-exchanges-change'));
+
+  fetch(`/api/peer-exchanges/${encodeURIComponent(postId)}/thank`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId }),
+  }).catch(() => {});
+
   return updatedPost;
 }
 
@@ -961,9 +1016,163 @@ export function addPeerExchangeReply(
     replies: [...(post.replies || []), newReply],
   };
   current[idx] = updatedPost;
+  cachedPeerExchanges = current;
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(current));
   window.dispatchEvent(new Event('peer-exchanges-change'));
+
+  fetch('/api/peer-exchanges/' + encodeURIComponent(postId) + '/reply', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(reply),
+  }).catch(() => {});
+
   return updatedPost;
+}
+
+// ================= المزامنة الشاملة عبر الخادم المركزي (Cross-Device Real-Time Sync) =================
+
+let isSyncing = false;
+export async function syncWithServer(): Promise<void> {
+  if (isSyncing || typeof window === 'undefined') return;
+  isSyncing = true;
+
+  try {
+    const payload = {
+      clientDocs: getDocuments(),
+      clientAnns: getAnnouncements(),
+      clientSummons: getSummons(),
+      clientPeer: getPeerExchanges(),
+      clientPins: {},
+    };
+
+    const syncRes = await fetch('/api/sync', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+
+    if (syncRes.ok) {
+      const data = await syncRes.json();
+
+      // 1. Documents
+      if (Array.isArray(data.documents)) {
+        cachedDocuments = data.documents;
+        safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(data.documents));
+        window.dispatchEvent(new Event('documents-change'));
+      }
+
+      // 2. Announcements
+      if (Array.isArray(data.announcements)) {
+        cachedAnnouncements = data.announcements;
+        safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(data.announcements));
+        window.dispatchEvent(new Event('announcements-change'));
+      }
+
+      // 3. Summons
+      if (Array.isArray(data.summons)) {
+        cachedSummons = data.summons;
+        safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(data.summons));
+        window.dispatchEvent(new Event('summons-change'));
+      }
+
+      // 4. Peer Exchanges
+      if (Array.isArray(data.peerExchanges)) {
+        cachedPeerExchanges = data.peerExchanges;
+        safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(data.peerExchanges));
+        window.dispatchEvent(new Event('peer-exchanges-change'));
+      }
+
+      // 5. User custom pins
+      if (data.userCustomPins && typeof data.userCustomPins === 'object') {
+        const users = getAllUsers();
+        let changed = false;
+        const updatedUsers = users.map(u => {
+          const customPin = data.userCustomPins[u.identifier.toLowerCase()];
+          if (customPin && u.pin !== customPin) {
+            changed = true;
+            return { ...u, pin: customPin };
+          }
+          return u;
+        });
+        if (changed) {
+          safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+        }
+      }
+    }
+
+    // 6. User Notifications
+    const user = getCurrentUser();
+    const query = new URLSearchParams();
+    if (user) {
+      query.set('userId', user.identifier);
+      query.set('role', user.role);
+      if (user.classId) query.set('classId', user.classId);
+    }
+    const notifsRes = await fetch(`/api/notifications?${query.toString()}`);
+    if (notifsRes.ok) {
+      const serverNotifs = await notifsRes.json();
+      safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(serverNotifs));
+      window.dispatchEvent(new Event('notifications-change'));
+    }
+  } catch (err) {
+    console.debug('[Sync] Sync network or transient offline:', err);
+  } finally {
+    isSyncing = false;
+  }
+}
+
+// ================= دوال إدارة التنبيهات (Notifications) =================
+
+export function getNotifications(): AppNotification[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+    return raw ? JSON.parse(raw) : [];
+  } catch {
+    return [];
+  }
+}
+
+export function getUnreadNotificationsCount(userId?: string): number {
+  if (!userId) {
+    const notifs = getNotifications();
+    return notifs.length;
+  }
+  const notifs = getNotifications();
+  return notifs.filter(n => !n.readBy || !n.readBy.includes(userId)).length;
+}
+
+export async function markNotificationAsRead(notifId: string, userId: string): Promise<void> {
+  const notifs = getNotifications();
+  const updated = notifs.map(n =>
+    n.id === notifId && (!n.readBy || !n.readBy.includes(userId))
+      ? { ...n, readBy: [...(n.readBy || []), userId] }
+      : n
+  );
+  safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('notifications-change'));
+
+  fetch('/api/notifications/mark-read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, notificationIds: [notifId] }),
+  }).catch(() => {});
+}
+
+export async function markAllNotificationsAsRead(userId: string): Promise<void> {
+  const notifs = getNotifications();
+  const updated = notifs.map(n =>
+    !n.readBy || !n.readBy.includes(userId)
+      ? { ...n, readBy: [...(n.readBy || []), userId] }
+      : n
+  );
+  safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('notifications-change'));
+
+  fetch('/api/notifications/mark-read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId }),
+  }).catch(() => {});
 }
 
 

@@ -171,3 +171,18 @@ export interface PeerExchangePost {
   replies: PeerExchangeReply[];
 }
 
+// ================= نظام التنبيهات والإشعارات =================
+export interface AppNotification {
+  id: string;
+  type: 'document' | 'announcement' | 'summon' | 'peer_post' | 'peer_reply';
+  title: string;
+  message: string;
+  targetRole?: 'all' | 'students' | 'teachers' | 'staff' | 'director' | 'censor';
+  targetClassId?: string; // e.g. '4AM-1'
+  targetUserId?: string; // e.g. student identifier
+  sourceAuthorName: string;
+  sourceId?: string;
+  createdAt: string;
+  readBy: string[]; // user identifiers who opened it
+}
+

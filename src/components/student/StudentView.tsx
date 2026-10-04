@@ -90,18 +90,23 @@ export const StudentView: React.FC<StudentViewProps> = ({
         return false;
       }
 
+      const targetClasses = Array.isArray(doc.targetClasses) ? doc.targetClasses : ['ALL'];
+
       if (doc.targetAudience === 'specific_student') {
         const matchesId = doc.targetStudentId && doc.targetStudentId === currentUser.identifier;
         const matchesName = doc.targetStudentName && currentUser.name && doc.targetStudentName.trim() === currentUser.name.trim();
         if (!matchesId && !matchesName) return false;
       } else if (doc.targetAudience === 'specific_class') {
-        if (!doc.targetClasses.includes(studentClassId)) return false;
+        if (!targetClasses.includes(studentClassId) && !targetClasses.includes('ALL')) return false;
       } else {
-        // Must be targeted to student's class, or "ALL"
+        // Must be targeted to student's class, level, or "ALL"
+        const studentLevel = studentClassId.split('-')[0]; // e.g. '4AM'
         const isTargeted =
-          doc.targetClasses.includes('ALL') ||
-          doc.targetClasses.includes(studentClassId) ||
-          (currentUser.className && doc.targetClasses.some(c => currentUser.className?.includes(c)));
+          targetClasses.length === 0 ||
+          targetClasses.includes('ALL') ||
+          targetClasses.includes(studentClassId) ||
+          targetClasses.includes(studentLevel) ||
+          (currentUser.className && targetClasses.some(c => currentUser.className?.includes(c)));
 
         if (!isTargeted) return false;
       }

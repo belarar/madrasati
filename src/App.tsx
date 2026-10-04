@@ -8,14 +8,19 @@ import {
   ArrowRight,
   BookOpen,
   Building,
+  Check,
   CheckCircle2,
+  Copy,
+  Download,
   FileCheck,
   FileText,
   GraduationCap,
   LogIn,
   MessageCircle,
   Phone,
+  Share2,
   Shield,
+  Smartphone,
   Sparkles,
   User,
   Users,
@@ -23,6 +28,7 @@ import {
 import { LoginModal } from './components/LoginModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { Navbar } from './components/Navbar';
+import { PwaInstallModal } from './components/common/PwaInstallModal';
 import { CensorView } from './components/censor/CensorView';
 import { DirectorView } from './components/director/DirectorView';
 import { StudentView } from './components/student/StudentView';
@@ -49,6 +55,9 @@ export default function App() {
   const [announcements, setAnnouncements] = useState<SchoolAnnouncement[]>([]);
   const [summons, setSummons] = useState<ParentSummon[]>([]);
   const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [pwaModalOpen, setPwaModalOpen] = useState(false);
+  const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
+  const [copiedShare, setCopiedShare] = useState(false);
 
   const refreshAllData = () => {
     setUser(getCurrentUser());
@@ -71,13 +80,27 @@ export default function App() {
     window.addEventListener('announcements-change', handleAnnsChange);
     window.addEventListener('summons-change', handleSummonsChange);
 
+    const handleBeforeInstall = (e: any) => {
+      e.preventDefault();
+      setDeferredPrompt(e);
+    };
+    window.addEventListener('beforeinstallprompt', handleBeforeInstall);
+
     return () => {
       window.removeEventListener('auth-change', handleAuthChange);
       window.removeEventListener('documents-change', handleDocsChange);
       window.removeEventListener('announcements-change', handleAnnsChange);
       window.removeEventListener('summons-change', handleSummonsChange);
+      window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
     };
   }, []);
+
+  const handleCopyCleanLink = () => {
+    const cleanUrl = window.location.origin;
+    navigator.clipboard.writeText(cleanUrl);
+    setCopiedShare(true);
+    setTimeout(() => setCopiedShare(false), 2500);
+  };
 
   const handleSelectUser = (user: UserProfile) => {
     setCurrentUser(user);
@@ -160,6 +183,32 @@ export default function App() {
                 >
                   <LogIn className="w-5 h-5" />
                   <span>تسجيل الدخول إلى المنصة</span>
+                </button>
+
+                <button
+                  onClick={() => setPwaModalOpen(true)}
+                  className="px-5 py-3.5 rounded-2xl bg-white hover:bg-emerald-50 text-emerald-800 font-bold text-sm sm:text-base border border-emerald-300 shadow-sm transition-transform active:scale-95 flex items-center gap-2"
+                >
+                  <Smartphone className="w-5 h-5 text-emerald-700" />
+                  <span>تثبيت التطبيق على الهاتف</span>
+                </button>
+
+                <button
+                  onClick={handleCopyCleanLink}
+                  className="px-5 py-3.5 rounded-2xl bg-white hover:bg-slate-100 text-slate-700 font-bold text-sm sm:text-base border border-slate-300 shadow-sm transition-transform active:scale-95 flex items-center gap-2"
+                  title="نسخ ومشاركة رابط المنصة بدون فتح حسابك"
+                >
+                  {copiedShare ? (
+                    <>
+                      <Check className="w-5 h-5 text-emerald-600" />
+                      <span className="text-emerald-700">تم نسخ الرابط العام!</span>
+                    </>
+                  ) : (
+                    <>
+                      <Share2 className="w-5 h-5 text-slate-600" />
+                      <span>مشاركة الرابط العام</span>
+                    </>
+                  )}
                 </button>
               </div>
             </div>
@@ -266,6 +315,7 @@ export default function App() {
       <MobileBottomNav
         currentUser={currentUser}
         onOpenSwitch={() => setLoginModalOpen(true)}
+        onOpenPwaInstall={() => setPwaModalOpen(true)}
       />
 
       {/* Login / Switch Modal */}
@@ -273,6 +323,13 @@ export default function App() {
         isOpen={loginModalOpen}
         onClose={() => setLoginModalOpen(false)}
         onLoginSuccess={handleSelectUser}
+      />
+
+      {/* PWA Mobile Installation Modal */}
+      <PwaInstallModal
+        isOpen={pwaModalOpen}
+        onClose={() => setPwaModalOpen(false)}
+        installPromptEvent={deferredPrompt}
       />
     </div>
   );

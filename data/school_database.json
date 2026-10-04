@@ -1,0 +1,81 @@
+{
+  "documents": [
+    {
+      "title": "فرض الثلاثي الأول في مادة الرياضيات",
+      "description": "يرجى حل التمارين بدقة والمراجعة الجيدة.",
+      "subject": "math",
+      "docType": "test",
+      "fileFormat": "pdf",
+      "fileName": "فرض_الرياضيات_فصل1.pdf",
+      "fileSize": "1.2 MB",
+      "authorId": "teacher-1098548010078900",
+      "authorName": "أستاذ الرياضيات",
+      "authorRole": "teacher",
+      "targetClasses": [
+        "ALL"
+      ],
+      "id": "doc-1791145789891",
+      "uploadDate": "2026-10-04T20:29:49.891Z",
+      "downloadCount": 0
+    },
+    {
+      "id": "doc-official-guide-1",
+      "title": "دليل استخدام المنصة الرقمية والتوجيهات المدرسية 2025/2026",
+      "description": "دليل شامل يوضح لكافة الأساتذة والتلاميذ كيفية تبادل الوثائق التعليمية (فروض، دروس، ملخصات بصيغ Word و PDF) ومتابعة الإعلانات المدرسية الرسمية.",
+      "subject": "admin",
+      "docType": "circular",
+      "fileFormat": "pdf",
+      "fileName": "دليل_استخدام_المنصة_الرقمية.pdf",
+      "fileSize": "1.4 MB",
+      "authorId": "director-1097448010036800",
+      "authorName": "إدارة متوسطة الشهيد بن نعمة مصطفى",
+      "authorRole": "director",
+      "targetClasses": [
+        "ALL"
+      ],
+      "targetLevel": "4AM",
+      "uploadDate": "2026-10-04T20:29:39.979Z",
+      "downloadCount": 15
+    }
+  ],
+  "announcements": [
+    {
+      "id": "ann-official-1",
+      "title": "افتتاح المنصة الرقمية الرسمية لمتوسطة الشهيد بن نعمة مصطفى",
+      "content": "ترحب إدارة متوسطة الشهيد بن نعمة مصطفى بكافة الأساتذة الكرام وبناتنا وأبنائنا التلاميذ في المنصة الرقمية المخصصة لتبادل الوثائق التعليمية (Word و PDF) والفروض والدروس والتوجيهات المدرسية.\nنتمنى للجميع موسماً دراسياً مكللاً بالنجاح والتفوق.",
+      "target": "all",
+      "priority": "important",
+      "authorName": "إدارة متوسطة الشهيد بن نعمة مصطفى",
+      "authorRole": "director",
+      "createdAt": "2026-10-04T20:29:39.980Z",
+      "badge": "إعلان افتتاحي رسمي",
+      "views": 12
+    }
+  ],
+  "summons": [],
+  "peerExchanges": [],
+  "notifications": [
+    {
+      "id": "notif-doc-1791145789891",
+      "type": "document",
+      "title": "وثيقة جديدة: فرض الثلاثي الأول في مادة الرياضيات",
+      "message": "قام أستاذ الرياضيات بنشر وثيقة جديدة (math) موجهة إلى: ALL.",
+      "targetRole": "students",
+      "sourceAuthorName": "أستاذ الرياضيات",
+      "sourceId": "doc-1791145789891",
+      "createdAt": "2026-10-04T20:29:49.891Z",
+      "readBy": []
+    },
+    {
+      "id": "notif-welcome",
+      "type": "announcement",
+      "title": "مرحباً بكم في المنصة الرقمية",
+      "message": "تم تدشين المنصة الرقمية لمتوسطة الشهيد بن نعمة مصطفى لتبادل الوثائق بين الأساتذة والتلاميذ.",
+      "targetRole": "all",
+      "sourceAuthorName": "إدارة المؤسسة",
+      "createdAt": "2026-10-04T20:29:39.980Z",
+      "readBy": []
+    }
+  ],
+  "userCustomPins": {}
+}

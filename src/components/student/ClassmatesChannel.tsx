@@ -100,6 +100,11 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
     if (onPostUpdated) onPostUpdated();
   };
 
+  React.useEffect(() => {
+    window.addEventListener('peer-exchanges-change', reloadPosts);
+    return () => window.removeEventListener('peer-exchanges-change', reloadPosts);
+  }, [studentClassId]);
+
   // Filter posts
   const filteredPosts = useMemo(() => {
     return posts.filter(post => {

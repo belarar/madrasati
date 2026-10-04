@@ -74,7 +74,12 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Filter documents created by this teacher
-  const myDocs = documents.filter(d => d.authorId === currentUser.id);
+  const myDocs = documents.filter(
+    d =>
+      d.authorId === currentUser.id ||
+      d.authorId === currentUser.identifier ||
+      (currentUser.identifier && d.authorId?.includes(currentUser.identifier))
+  );
   const totalDownloads = myDocs.reduce((acc, d) => acc + (d.downloadCount || 0), 0);
 
   // Announcements targeted to teachers or all
