@@ -62,6 +62,32 @@ export function initStorage(): void {
   cachedSummons = getSummons();
   cachedPeerExchanges = getPeerExchanges();
 
+  // Listen for storage events from other tabs / windows
+  if (!(window as any).__benNaamaStorageListener) {
+    (window as any).__benNaamaStorageListener = true;
+    window.addEventListener('storage', (e) => {
+      if (e.key === STORAGE_KEYS.DOCUMENTS) {
+        cachedDocuments = null;
+        window.dispatchEvent(new Event('documents-change'));
+      }
+      if (e.key === STORAGE_KEYS.ANNOUNCEMENTS) {
+        cachedAnnouncements = null;
+        window.dispatchEvent(new Event('announcements-change'));
+      }
+      if (e.key === STORAGE_KEYS.SUMMONS) {
+        cachedSummons = null;
+        window.dispatchEvent(new Event('summons-change'));
+      }
+      if (e.key === STORAGE_KEYS.PEER_EXCHANGES) {
+        cachedPeerExchanges = null;
+        window.dispatchEvent(new Event('peer-exchanges-change'));
+      }
+      if (e.key === STORAGE_KEYS.CURRENT_USER) {
+        window.dispatchEvent(new Event('auth-change'));
+      }
+    });
+  }
+
   // Start real-time server synchronization across devices
   syncWithServer();
   if (!(window as any).__benNaamaSyncInterval) {
@@ -377,17 +403,36 @@ export function authenticateUser(identifier: string, pin?: string): {
 
 // Safe localStorage setter with QuotaExceeded fallback protection
 export function safeSetItem(key: string, value: string): boolean {
+  if (typeof window === 'undefined') return false;
   try {
-    localStorage.setItem(key, value);
+    let toStore = value;
+    if (key === STORAGE_KEYS.DOCUMENTS) {
+      try {
+        const parsed = JSON.parse(value);
+        if (Array.isArray(parsed)) {
+          // Never store heavy base64 file data URLs in localStorage to prevent QuotaExceededError
+          const stripped = parsed.map(d => {
+            if (d && d.fileDataUrl && d.fileDataUrl.length > 200) {
+              return { ...d, fileDataUrl: undefined };
+            }
+            return d;
+          });
+          toStore = JSON.stringify(stripped);
+        }
+      } catch {
+        // Ignored
+      }
+    }
+    localStorage.setItem(key, toStore);
     return true;
   } catch (err: unknown) {
     console.warn(`[Storage] مساحة التخزين ممتلئة للمفتاح ${key}. يتم تنظيف المرفقات للحفاظ على الاستقرار.`);
     try {
       const parsed = JSON.parse(value);
       if (Array.isArray(parsed)) {
-        // Strip heavy base64 strings to stay within quota on mobile phones
+        // Strip all base64 strings to stay within quota
         const trimmed = parsed.map(item => {
-          if (item && item.fileDataUrl && item.fileDataUrl.length > 2000) {
+          if (item && item.fileDataUrl) {
             return { ...item, fileDataUrl: undefined };
           }
           return item;
@@ -404,18 +449,25 @@ export function safeSetItem(key: string, value: string): boolean {
 
 // Documents
 export function getDocuments(): SchoolDocument[] {
+  // If in-memory cache already has documents, prefer it (contains fresh data & in-memory file data)
   if (cachedDocuments && cachedDocuments.length > 0) {
     return cachedDocuments;
   }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.DOCUMENTS);
-    if (!raw) return INITIAL_DOCUMENTS;
-    const parsed = JSON.parse(raw);
-    cachedDocuments = parsed;
-    return parsed;
-  } catch {
-    return INITIAL_DOCUMENTS;
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEYS.DOCUMENTS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          cachedDocuments = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch (err) {
+    console.debug('Error reading local documents:', err);
   }
+  return cachedDocuments && cachedDocuments.length > 0 ? cachedDocuments : INITIAL_DOCUMENTS;
 }
 
 export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'downloadCount'>): SchoolDocument {
@@ -440,7 +492,16 @@ export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'do
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(newDoc),
-  }).catch(err => console.debug('[Sync] Document post err:', err));
+  })
+    .then(async res => {
+      if (res.ok) {
+        const saved = await res.json();
+        if (saved && saved.id) {
+          syncWithServer();
+        }
+      }
+    })
+    .catch(err => console.debug('[Sync] Document post err:', err));
 
   return newDoc;
 }
@@ -492,18 +553,21 @@ export function downloadFile(doc: SchoolDocument): void {
 
 // Announcements
 export function getAnnouncements(): SchoolAnnouncement[] {
-  if (cachedAnnouncements && cachedAnnouncements.length > 0) {
-    return cachedAnnouncements;
-  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
-    if (!raw) return INITIAL_ANNOUNCEMENTS;
-    const parsed = JSON.parse(raw);
-    cachedAnnouncements = parsed;
-    return parsed;
-  } catch {
-    return INITIAL_ANNOUNCEMENTS;
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          cachedAnnouncements = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch (err) {
+    console.debug('Error reading local announcements:', err);
   }
+  return cachedAnnouncements && cachedAnnouncements.length > 0 ? cachedAnnouncements : INITIAL_ANNOUNCEMENTS;
 }
 
 export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>): SchoolAnnouncement {
@@ -543,18 +607,21 @@ export function deleteAnnouncement(annId: string): void {
 
 // Summons (الاستدعاءات)
 export function getSummons(): ParentSummon[] {
-  if (cachedSummons) {
-    return cachedSummons;
-  }
   try {
-    const raw = localStorage.getItem(STORAGE_KEYS.SUMMONS);
-    if (!raw) return INITIAL_SUMMONS;
-    const parsed = JSON.parse(raw);
-    cachedSummons = parsed;
-    return parsed;
-  } catch {
-    return INITIAL_SUMMONS;
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEYS.SUMMONS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) {
+          cachedSummons = parsed;
+          return parsed;
+        }
+      }
+    }
+  } catch (err) {
+    console.debug('Error reading local summons:', err);
   }
+  return cachedSummons && cachedSummons.length > 0 ? cachedSummons : INITIAL_SUMMONS;
 }
 
 export function saveSummon(summon: Omit<ParentSummon, 'id' | 'issuedAt' | 'status'>): ParentSummon {
@@ -1051,7 +1118,7 @@ export async function syncWithServer(): Promise<void> {
 
       // 1. Documents: Intelligently merge server documents with any local docs
       if (Array.isArray(data.documents)) {
-        const currentLocal = getDocuments();
+        const currentLocal = cachedDocuments && cachedDocuments.length > 0 ? cachedDocuments : getDocuments();
         const serverDocIds = new Set(data.documents.map((d: SchoolDocument) => d.id));
         
         // Find documents saved locally that the server hasn't seen yet
@@ -1081,7 +1148,7 @@ export async function syncWithServer(): Promise<void> {
         const prevDocsStr = JSON.stringify(currentLocal.map(d => ({ id: d.id, dl: d.downloadCount })));
         const newDocsStr = JSON.stringify(mergedDocs.map(d => ({ id: d.id, dl: d.downloadCount })));
 
-        if (prevDocsStr !== newDocsStr || !cachedDocuments) {
+        if (prevDocsStr !== newDocsStr || !cachedDocuments || cachedDocuments.length !== mergedDocs.length) {
           cachedDocuments = mergedDocs;
           safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(mergedDocs));
           window.dispatchEvent(new Event('documents-change'));

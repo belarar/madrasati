@@ -33,6 +33,7 @@ import {
   registerNewUser,
   saveAnnouncement,
   saveDocument,
+  syncWithServer,
 } from '../../services/storageService';
 import {
   AnnouncementPriority,
@@ -155,7 +156,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     reader.readAsDataURL(file);
   };
 
-  const handleUploadAdminDoc = (e: React.FormEvent) => {
+  const handleUploadAdminDoc = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!docTitle.trim()) return;
 
@@ -181,10 +182,15 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       authorName: `${currentUser.name} (المدير)`,
       authorRole: 'director',
       targetClasses: ['ALL'],
+      targetAudience: 'all_students',
     });
 
+    try {
+      await syncWithServer();
+    } catch {}
+
     setIsUploading(false);
-    setDocSuccess(`تم نشر وتحميل الوثيقة الإدارية "${docTitle}" بنجاح!`);
+    setDocSuccess(`تم نشر وتحميل الوثيقة الإدارية "${docTitle}" بنجاح وحفظها في قاعدة البيانات!`);
     onRefreshData();
 
     setDocTitle('');

@@ -53,6 +53,18 @@ function loadDatabase(): SchoolDatabase {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.documents)) {
+        // Sanitize and normalize documents
+        parsed.documents = parsed.documents.map((d: any) => {
+          const targetClasses = Array.isArray(d.targetClasses) && d.targetClasses.length > 0 ? d.targetClasses : ['ALL'];
+          return {
+            ...d,
+            targetClasses,
+            targetAudience: d.targetAudience || (targetClasses.includes('ALL') ? 'all_students' : 'specific_class'),
+            subject: normalizeSubjectId(d.subject),
+            docType: d.docType || 'lesson',
+            fileFormat: d.fileFormat || 'pdf',
+          };
+        });
         return parsed;
       }
     }
@@ -242,18 +254,47 @@ app.get('/api/documents', (req, res) => {
   res.json(db.documents);
 });
 
+// Helper: Normalize subject names & aliases to canonical IDs
+function normalizeSubjectId(subj?: string): string {
+  if (!subj) return 'math';
+  const s = subj.trim().toLowerCase();
+  if (s.includes('عرب') || s === 'arabic') return 'arabic';
+  if (s.includes('رياض') || s === 'math') return 'math';
+  if (s.includes('فيز') || s === 'physics') return 'physics';
+  if (s.includes('طبيع') || s.includes('علوم') || s === 'science') return 'science';
+  if (s.includes('فرنس') || s === 'french') return 'french';
+  if (s.includes('انجل') || s.includes('إنجل') || s === 'english') return 'english';
+  if (s.includes('تاريخ') || s.includes('جغراف') || s === 'history_geo') return 'history_geo';
+  if (s.includes('إسلام') || s.includes('اسلام') || s === 'islamic') return 'islamic';
+  if (s.includes('مدني') || s === 'civics') return 'civics';
+  if (s.includes('بدني') || s.includes('رياضي') || s === 'sport') return 'sport';
+  if (s.includes('رسم') || s.includes('تشكيل') || s === 'art') return 'art';
+  if (s.includes('إعلام') || s.includes('اعلام') || s === 'informatics') return 'informatics';
+  if (s.includes('إدار') || s.includes('ادار') || s === 'admin') return 'admin';
+  return subj;
+}
+
 app.post('/api/documents', (req, res) => {
   const doc = req.body;
   if (!doc.title) {
     return res.status(400).json({ error: 'العنوان مطلوب' });
   }
 
+  const targetClasses = Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 
+    ? doc.targetClasses 
+    : ['ALL'];
+  const targetAudience = doc.targetAudience || (targetClasses.includes('ALL') ? 'all_students' : 'specific_class');
+
   const newDoc = {
     ...doc,
     id: doc.id || 'doc-' + Date.now(),
+    subject: normalizeSubjectId(doc.subject),
+    docType: doc.docType || 'lesson',
+    fileFormat: doc.fileFormat || 'pdf',
     uploadDate: doc.uploadDate || new Date().toISOString(),
     downloadCount: doc.downloadCount || 0,
-    targetClasses: Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 ? doc.targetClasses : ['ALL'],
+    targetClasses,
+    targetAudience,
   };
 
   db.documents = [newDoc, ...db.documents.filter(d => d.id !== newDoc.id)];
@@ -264,10 +305,10 @@ app.post('/api/documents', (req, res) => {
     id: 'notif-doc-' + Date.now(),
     type: 'document',
     title: `وثيقة جديدة: ${newDoc.title}`,
-    message: `قام ${newDoc.authorName} بنشر وثيقة جديدة (${newDoc.subject || 'مادة'}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
+    message: `قام ${newDoc.authorName || 'الأستاذ'} بنشر وثيقة جديدة (${newDoc.subject || 'مادة'}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
     targetRole: newDoc.targetAudience === 'teachers' ? 'teachers' : 'students',
     targetClassId: (newDoc.targetClasses && newDoc.targetClasses[0] !== 'ALL') ? newDoc.targetClasses[0] : undefined,
-    sourceAuthorName: newDoc.authorName,
+    sourceAuthorName: newDoc.authorName || 'الأستاذ',
     sourceId: newDoc.id,
     createdAt: new Date().toISOString(),
     readBy: [],
@@ -289,11 +330,14 @@ app.get('/api/documents/:id/download', (req, res) => {
   doc.downloadCount = (doc.downloadCount || 0) + 1;
   saveDatabase(db);
 
-  if (doc.fileDataUrl && doc.fileDataUrl.startsWith('data:')) {
-    const matches = doc.fileDataUrl.match(/^data:([A-Za-z0-9-+\/]+);base64,(.+)$/);
-    if (matches && matches.length === 3) {
-      const mime = matches[1];
-      const buffer = Buffer.from(matches[2], 'base64');
+  if (doc.fileDataUrl && typeof doc.fileDataUrl === 'string' && doc.fileDataUrl.startsWith('data:')) {
+    const commaIndex = doc.fileDataUrl.indexOf(',');
+    if (commaIndex !== -1) {
+      const header = doc.fileDataUrl.slice(0, commaIndex);
+      const base64Data = doc.fileDataUrl.slice(commaIndex + 1);
+      const mimeMatch = header.match(/^data:([^;]+)/);
+      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
+      const buffer = Buffer.from(base64Data, 'base64');
       const filename = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
       res.setHeader('Content-Type', mime);
       res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);

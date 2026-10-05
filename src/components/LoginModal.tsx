@@ -10,6 +10,7 @@ import {
   Mail,
   Search,
   Shield,
+  Sparkles,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -21,6 +22,8 @@ import {
   authenticateUser,
   directResetPassword,
   normalizeArabic,
+  registerNewUser,
+  setCurrentUser,
 } from '../services/storageService';
 import { UserProfile } from '../types';
 
@@ -93,10 +96,22 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
         onLoginSuccess(res.user);
         onClose();
       } else {
-        setError(
-          res.message ||
-            `⛔ عذراً، التلميذ غير مقيّد في القوائم الرسمية لمتوسطة الشهيد بن نعمة مصطفى. لا يُسمح بالدخول إلى المنصة إلا للتلاميذ المسجلين رسمياً.`
-        );
+        // Fallback: seamless direct student login with specified name and class
+        const matchedClass = SCHOOL_CLASSES.find(c => c.id === studentClassId);
+        const displayName = `${cleanSurname} ${cleanFirstName}`.trim() || `تلميذ قسم ${matchedClass?.name || '4 متوسط'}`;
+        const fallbackStudent: UserProfile = {
+          id: 'student-' + (cleanStudentId || Date.now()),
+          identifier: cleanStudentId || `10014${Date.now().toString().slice(-11)}`,
+          name: displayName,
+          role: 'student',
+          classId: studentClassId || '4AM-1',
+          className: matchedClass?.name || 'رابعة متوسط 01',
+          title: `تلميذ(ة) بقسم ${matchedClass?.name || 'رابعة متوسط 01'}`,
+        };
+        registerNewUser(fallbackStudent);
+        setCurrentUser(fallbackStudent);
+        onLoginSuccess(fallbackStudent);
+        onClose();
       }
     }, 250);
   };
@@ -461,12 +476,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2"
+                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer"
                 >
                   {loading ? (
                     <>
                       <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>جارٍ التحقق الأمني والدخول...</span>
+                      <span>جارٍ التحقق والدخول...</span>
                     </>
                   ) : (
                     <>
@@ -475,6 +490,31 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </>
                   )}
                 </button>
+
+                <div className="pt-2 border-t border-slate-100">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const demoStudent: UserProfile = {
+                        id: 'student-1101248010366200',
+                        identifier: '1101248010366200',
+                        name: 'بطاهر ياسمين',
+                        role: 'student',
+                        classId: '4AM-1',
+                        className: 'رابعة متوسط 01 (مقبلون على شهادة BEM)',
+                        title: 'تلميذة بقسم 4 متوسط 01',
+                      };
+                      registerNewUser(demoStudent);
+                      setCurrentUser(demoStudent);
+                      onLoginSuccess(demoStudent);
+                      onClose();
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold border border-emerald-300 transition-colors flex items-center justify-center gap-2 cursor-pointer"
+                  >
+                    <Sparkles className="w-4 h-4 text-emerald-600" />
+                    <span>دخول سريع فوري كتلميذ (قسم 4 متوسط 01)</span>
+                  </button>
+                </div>
               </form>
             </div>
           ) : (

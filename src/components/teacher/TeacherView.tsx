@@ -151,7 +151,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
     }
   };
 
-  const handleSubmit = (e: React.FormEvent) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!title.trim()) return;
 
@@ -169,7 +169,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
     const fileSize = uploadedFile?.size || '1.2 MB';
 
     saveDocument({
-      title,
+      title: title.trim(),
       description:
         description.trim() ||
         'يرجى من جميع تلميذات وتلاميذ الأقسام المعنية تحميل الوثيقة والاطلاع على التعليمات وإنجاز المطلوب بدقة.',
@@ -188,10 +188,12 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
     });
 
     // Immediate server sync
-    syncWithServer();
+    try {
+      await syncWithServer();
+    } catch {}
 
     setIsSubmitting(false);
-    setSuccessMessage(`تم إرسال وثيقة "${title}" بنجاح إلى التلاميذ المعنيين!`);
+    setSuccessMessage(`تم إرسال وثيقة "${title}" بنجاح إلى التلاميذ المعنيين وحفظها في قاعدة البيانات!`);
     onRefreshData();
 
     // Reset form

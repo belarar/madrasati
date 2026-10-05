@@ -81,6 +81,26 @@ export const StudentView: React.FC<StudentViewProps> = ({
     if (onRefreshData) onRefreshData();
   };
 
+  // Helper to normalize subjects for bulletproof matching
+  const normalizeSubj = (s?: string): string => {
+    if (!s) return '';
+    const str = s.trim().toLowerCase();
+    if (str.includes('عرب') || str === 'arabic') return 'arabic';
+    if (str.includes('رياض') || str === 'math') return 'math';
+    if (str.includes('فيز') || str === 'physics') return 'physics';
+    if (str.includes('طبيع') || str.includes('علوم') || str === 'science') return 'science';
+    if (str.includes('فرنس') || str === 'french') return 'french';
+    if (str.includes('انجل') || str.includes('إنجل') || str === 'english') return 'english';
+    if (str.includes('تاريخ') || str.includes('جغراف') || str === 'history_geo') return 'history_geo';
+    if (str.includes('إسلام') || str.includes('اسلام') || str === 'islamic') return 'islamic';
+    if (str.includes('مدني') || str === 'civics') return 'civics';
+    if (str.includes('بدني') || str.includes('رياضي') || str === 'sport') return 'sport';
+    if (str.includes('رسم') || str.includes('تشكيل') || str === 'art') return 'art';
+    if (str.includes('إعلام') || str.includes('اعلام') || str === 'informatics') return 'informatics';
+    if (str.includes('إدار') || str.includes('ادار') || str === 'admin') return 'admin';
+    return str;
+  };
+
   // Filter documents meant for this student's class or "ALL"
   const studentClassId = currentUser.classId || '4AM-1';
 
@@ -91,11 +111,13 @@ export const StudentView: React.FC<StudentViewProps> = ({
       if (doc.targetAudience === 'teachers' || doc.targetAudience === 'staff') return false;
       const targetClasses = Array.isArray(doc.targetClasses) ? doc.targetClasses : ['ALL'];
       return (
+        doc.targetAudience === 'all_students' ||
         targetClasses.length === 0 ||
         targetClasses.includes('ALL') ||
         targetClasses.includes(studentClassId) ||
         targetClasses.includes(studentLevel) ||
-        (currentUser.className && targetClasses.some(c => currentUser.className?.includes(c)))
+        targetClasses.some(c => c.toLowerCase() === studentClassId.toLowerCase()) ||
+        (currentUser.className && targetClasses.some(c => currentUser.className?.includes(c) || c.includes(currentUser.className!)))
       );
     }).length;
   }, [documents, studentClassId, currentUser.className]);
@@ -119,17 +141,19 @@ export const StudentView: React.FC<StudentViewProps> = ({
       if (scopeFilter === 'my_class') {
         const studentLevel = studentClassId.split('-')[0]; // e.g. '4AM'
         const isTargeted =
+          doc.targetAudience === 'all_students' ||
           targetClasses.length === 0 ||
           targetClasses.includes('ALL') ||
           targetClasses.includes(studentClassId) ||
           targetClasses.includes(studentLevel) ||
-          (currentUser.className && targetClasses.some(c => currentUser.className?.includes(c)));
+          targetClasses.some(c => c.toLowerCase() === studentClassId.toLowerCase()) ||
+          (currentUser.className && targetClasses.some(c => currentUser.className?.includes(c) || c.includes(currentUser.className!)));
 
         if (!isTargeted) return false;
       }
 
-      // Filter by subject
-      if (selectedSubject !== 'ALL' && doc.subject !== selectedSubject) {
+      // Filter by subject with smart alias normalization
+      if (selectedSubject !== 'ALL' && normalizeSubj(doc.subject) !== normalizeSubj(selectedSubject)) {
         return false;
       }
 
@@ -454,18 +478,35 @@ export const StudentView: React.FC<StudentViewProps> = ({
               </div>
               <h3 className="font-bold text-lg text-slate-800">لا توجد وثائق مطابقة حالياً</h3>
               <p className="text-sm text-slate-500 max-w-md mx-auto">
-                لم يقم الأساتذة برفع وثائق جديدة تطابق معايير البحث المحددة. جرب تغيير المادة أو تفقد الإعلانات.
+                {documents.length > 0
+                  ? `توجد ${documents.length} وثيقة في رصيد المؤسسة العام. يمكنك التبديل إلى "كافة وثائق المؤسسة" أو إعادة ضبط عوامل التصفية.`
+                  : 'لم يقم الأساتذة برفع وثائق جديدة تطابق معايير البحث المحددة. جرب تغيير المادة أو تفقد الإعلانات.'}
               </p>
-              <button
-                onClick={() => {
-                  setSelectedSubject('ALL');
-                  setSelectedType('ALL');
-                  setSearchQuery('');
-                }}
-                className="px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800 transition-colors"
-              >
-                عرض جميع الوثائق المتاحة
-              </button>
+              <div className="flex flex-wrap items-center justify-center gap-2 pt-2">
+                {documents.length > 0 && scopeFilter === 'my_class' && (
+                  <button
+                    onClick={() => {
+                      setScopeFilter('all_school');
+                      setSelectedSubject('ALL');
+                      setSelectedType('ALL');
+                      setSearchQuery('');
+                    }}
+                    className="px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold hover:bg-emerald-800 transition-colors shadow-xs"
+                  >
+                    عرض كافة وثائق المؤسسة ({documents.length} وثيقة)
+                  </button>
+                )}
+                <button
+                  onClick={() => {
+                    setSelectedSubject('ALL');
+                    setSelectedType('ALL');
+                    setSearchQuery('');
+                  }}
+                  className="px-4 py-2 rounded-xl bg-slate-100 text-slate-700 text-xs font-bold hover:bg-slate-200 transition-colors border border-slate-200"
+                >
+                  إعادة ضبط عوامل التصفية
+                </button>
+              </div>
             </div>
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">

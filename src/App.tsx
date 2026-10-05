@@ -28,6 +28,8 @@ import {
 import { LoginModal } from './components/LoginModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
 import { Navbar } from './components/Navbar';
+import { DocumentCard } from './components/common/DocumentCard';
+import { DocumentPreviewModal } from './components/common/DocumentPreviewModal';
 import { PwaInstallModal } from './components/common/PwaInstallModal';
 import { CensorView } from './components/censor/CensorView';
 import { DirectorView } from './components/director/DirectorView';
@@ -41,6 +43,7 @@ import {
   getSummons,
   initStorage,
   setCurrentUser,
+  syncWithServer,
 } from './services/storageService';
 import {
   ParentSummon,
@@ -105,6 +108,8 @@ export default function App() {
   const handleSelectUser = (user: UserProfile) => {
     setCurrentUser(user);
     setUser(user);
+    refreshAllData();
+    syncWithServer().then(() => refreshAllData()).catch(() => {});
   };
 
   return (
