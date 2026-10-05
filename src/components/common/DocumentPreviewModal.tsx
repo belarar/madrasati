@@ -131,27 +131,32 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ doc,
           </div>
 
           {/* Target Classes */}
-          <div>
-            <label className="block text-xs font-bold text-slate-600 mb-2">
-              الأقسام والفصول المعنية بالوثيقة:
-            </label>
-            <div className="flex flex-wrap gap-2">
-              {doc.targetClasses.includes('ALL') ? (
-                <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold px-3 py-1 rounded-xl text-xs">
-                  جميع أقسام وأطوار متوسطة الشهيد بن نعمة
-                </span>
-              ) : (
-                doc.targetClasses.map(cls => (
-                  <span
-                    key={cls}
-                    className="bg-sky-100 text-sky-900 border border-sky-300 font-bold px-3 py-1 rounded-xl text-xs"
-                  >
-                    {cls}
-                  </span>
-                ))
-              )}
-            </div>
-          </div>
+          {(() => {
+            const targetClasses = Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 ? doc.targetClasses : ['ALL'];
+            return (
+              <div>
+                <label className="block text-xs font-bold text-slate-600 mb-2">
+                  الأقسام والفصول المعنية بالوثيقة:
+                </label>
+                <div className="flex flex-wrap gap-2">
+                  {targetClasses.includes('ALL') ? (
+                    <span className="bg-emerald-100 text-emerald-900 border border-emerald-300 font-bold px-3 py-1 rounded-xl text-xs">
+                      جميع أقسام وأطوار متوسطة الشهيد بن نعمة
+                    </span>
+                  ) : (
+                    targetClasses.map(cls => (
+                      <span
+                        key={cls}
+                        className="bg-sky-100 text-sky-900 border border-sky-300 font-bold px-3 py-1 rounded-xl text-xs"
+                      >
+                        {cls}
+                      </span>
+                    ))
+                  )}
+                </div>
+              </div>
+            );
+          })()}
 
           {/* Institutional note */}
           <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-3">

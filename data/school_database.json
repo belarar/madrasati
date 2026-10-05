@@ -56,6 +56,17 @@
   "peerExchanges": [],
   "notifications": [
     {
+      "id": "notif-doc-1791218499153",
+      "type": "document",
+      "title": "وثيقة جديدة: درس تجريبي للأستاذ: الأعداد النسبية",
+      "message": "قام أستاذ الرياضيات بنشر وثيقة جديدة (math) موجهة إلى: ALL.",
+      "targetRole": "students",
+      "sourceAuthorName": "أستاذ الرياضيات",
+      "sourceId": "doc-1791218499153",
+      "createdAt": "2026-10-05T16:41:39.153Z",
+      "readBy": []
+    },
+    {
       "id": "notif-doc-1791145789891",
       "type": "document",
       "title": "وثيقة جديدة: فرض الثلاثي الأول في مادة الرياضيات",

@@ -23,9 +23,10 @@ import {
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SUBJECTS } from '../../data/mockData';
-import { deleteDocument, saveDocument } from '../../services/storageService';
+import { deleteDocument, saveDocument, syncWithServer } from '../../services/storageService';
 import {
   DocType,
+  EducationLevel,
   FileFormat,
   SchoolAnnouncement,
   SchoolDocument,
@@ -62,7 +63,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   const [targetClasses, setTargetClasses] = useState<string[]>(
     currentUser.assignedClasses || ['4AM-1']
   );
-  const [selectAllClasses, setSelectAllClasses] = useState(false);
+  const [selectAllClasses, setSelectAllClasses] = useState(true);
   const [uploadedFile, setUploadedFile] = useState<{
     name: string;
     size: string;
@@ -156,7 +157,11 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
 
     setIsSubmitting(true);
 
-    const docTargetClasses = selectAllClasses ? ['ALL'] : targetClasses;
+    const docTargetClasses = selectAllClasses
+      ? ['ALL']
+      : targetClasses.length > 0
+        ? targetClasses
+        : ['ALL'];
 
     const fileName =
       uploadedFile?.name ||
@@ -178,8 +183,12 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
       authorName: currentUser.name,
       authorRole: 'teacher',
       targetClasses: docTargetClasses,
-      targetLevel: '4AM',
+      targetAudience: selectAllClasses || docTargetClasses.includes('ALL') ? 'all_students' : 'specific_class',
+      targetLevel: docTargetClasses.includes('ALL') ? undefined : (docTargetClasses[0]?.split('-')[0] as EducationLevel),
     });
+
+    // Immediate server sync
+    syncWithServer();
 
     setIsSubmitting(false);
     setSuccessMessage(`تم إرسال وثيقة "${title}" بنجاح إلى التلاميذ المعنيين!`);
@@ -391,6 +400,20 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
                   {selectAllClasses ? 'إلغاء تحديد الكل' : 'تحديد جميع الأقسام'}
                 </button>
               </div>
+
+              {selectAllClasses ? (
+                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-xs font-bold text-emerald-900 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                  <span>📢 الوثيقة ستصل إلى: جميع تلميذات وتلاميذ المؤسسة (كافة الأقسام والمستويات)</span>
+                </div>
+              ) : (
+                <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-300 text-xs font-bold text-blue-900 flex items-center gap-2">
+                  <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" />
+                  <span>
+                    📢 الوثيقة ستصل حصراً إلى الأقسام المحددة ({targetClasses.length} قسم: {targetClasses.join('، ')})
+                  </span>
+                </div>
+              )}
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
                 {SCHOOL_CLASSES.map(cls => {

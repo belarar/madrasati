@@ -22,7 +22,7 @@ import {
 import { OFFICIAL_STUDENTS_LIST, toUserProfile } from '../data/officialStudents';
 import { OFFICIAL_STAFF_LIST, toStaffUserProfile } from '../data/officialStaff';
 
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   CURRENT_USER: 'ben_naama_current_user',
   DOCUMENTS: 'ben_naama_documents',
   ANNOUNCEMENTS: 'ben_naama_announcements',
@@ -420,12 +420,14 @@ export function getDocuments(): SchoolDocument[] {
 
 export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'downloadCount'>): SchoolDocument {
   const docs = getDocuments();
+  const targetClasses = Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 ? doc.targetClasses : ['ALL'];
   const newDoc: SchoolDocument = {
     ...doc,
     id: 'doc-' + Date.now(),
     uploadDate: new Date().toISOString(),
     downloadCount: 0,
-    targetClasses: Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 ? doc.targetClasses : ['ALL'],
+    targetClasses,
+    targetAudience: doc.targetAudience || (targetClasses.includes('ALL') ? 'all_students' : 'specific_class'),
   };
 
   const updated = [newDoc, ...docs.filter(d => d.id !== newDoc.id)];
@@ -1037,49 +1039,119 @@ export async function syncWithServer(): Promise<void> {
   isSyncing = true;
 
   try {
-    const payload = {
-      clientDocs: getDocuments(),
-      clientAnns: getAnnouncements(),
-      clientSummons: getSummons(),
-      clientPeer: getPeerExchanges(),
-      clientPins: {},
-    };
-
-    const syncRes = await fetch('/api/sync', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const syncRes = await fetch('/api/sync');
 
     if (syncRes.ok) {
+      const contentType = syncRes.headers.get('content-type') || '';
+      if (!contentType.includes('application/json')) {
+        return;
+      }
+
       const data = await syncRes.json();
 
-      // 1. Documents
+      // 1. Documents: Intelligently merge server documents with any local docs
       if (Array.isArray(data.documents)) {
-        cachedDocuments = data.documents;
-        safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(data.documents));
-        window.dispatchEvent(new Event('documents-change'));
+        const currentLocal = getDocuments();
+        const serverDocIds = new Set(data.documents.map((d: SchoolDocument) => d.id));
+        
+        // Find documents saved locally that the server hasn't seen yet
+        const unsyncedLocals = currentLocal.filter(d => !serverDocIds.has(d.id));
+
+        // Re-push unsynced local documents to ensure they reach the server and other devices
+        for (const un of unsyncedLocals) {
+          fetch('/api/documents', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(un),
+          }).catch(() => {});
+        }
+
+        // Unified documents list: unsynced locals at top, then server documents
+        const mergedDocs: SchoolDocument[] = [
+          ...unsyncedLocals,
+          ...data.documents.map((sDoc: SchoolDocument) => {
+            const localMatch = currentLocal.find(l => l.id === sDoc.id);
+            if (localMatch?.fileDataUrl && !sDoc.fileDataUrl) {
+              return { ...sDoc, fileDataUrl: localMatch.fileDataUrl };
+            }
+            return sDoc;
+          }),
+        ];
+
+        const prevDocsStr = JSON.stringify(currentLocal.map(d => ({ id: d.id, dl: d.downloadCount })));
+        const newDocsStr = JSON.stringify(mergedDocs.map(d => ({ id: d.id, dl: d.downloadCount })));
+
+        if (prevDocsStr !== newDocsStr || !cachedDocuments) {
+          cachedDocuments = mergedDocs;
+          safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(mergedDocs));
+          window.dispatchEvent(new Event('documents-change'));
+        }
       }
 
       // 2. Announcements
       if (Array.isArray(data.announcements)) {
-        cachedAnnouncements = data.announcements;
-        safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(data.announcements));
-        window.dispatchEvent(new Event('announcements-change'));
+        const currentAnns = getAnnouncements();
+        const serverAnnIds = new Set(data.announcements.map((a: SchoolAnnouncement) => a.id));
+        const unsyncedAnns = currentAnns.filter(a => !serverAnnIds.has(a.id));
+        for (const un of unsyncedAnns) {
+          fetch('/api/announcements', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(un),
+          }).catch(() => {});
+        }
+        const mergedAnns = [...unsyncedAnns, ...data.announcements];
+        const prevAnnsStr = JSON.stringify(currentAnns.map(a => a.id));
+        const newAnnsStr = JSON.stringify(mergedAnns.map(a => a.id));
+        if (prevAnnsStr !== newAnnsStr || !cachedAnnouncements) {
+          cachedAnnouncements = mergedAnns;
+          safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(mergedAnns));
+          window.dispatchEvent(new Event('announcements-change'));
+        }
       }
 
       // 3. Summons
       if (Array.isArray(data.summons)) {
-        cachedSummons = data.summons;
-        safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(data.summons));
-        window.dispatchEvent(new Event('summons-change'));
+        const currentSummons = getSummons();
+        const serverSummonIds = new Set(data.summons.map((s: ParentSummon) => s.id));
+        const unsyncedSummons = currentSummons.filter(s => !serverSummonIds.has(s.id));
+        for (const un of unsyncedSummons) {
+          fetch('/api/summons', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(un),
+          }).catch(() => {});
+        }
+        const mergedSummons = [...unsyncedSummons, ...data.summons];
+        const prevSummonsStr = JSON.stringify(currentSummons.map(s => s.id));
+        const newSummonsStr = JSON.stringify(mergedSummons.map(s => s.id));
+        if (prevSummonsStr !== newSummonsStr || !cachedSummons) {
+          cachedSummons = mergedSummons;
+          safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(mergedSummons));
+          window.dispatchEvent(new Event('summons-change'));
+        }
       }
 
       // 4. Peer Exchanges
       if (Array.isArray(data.peerExchanges)) {
-        cachedPeerExchanges = data.peerExchanges;
-        safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(data.peerExchanges));
-        window.dispatchEvent(new Event('peer-exchanges-change'));
+        const currentPeer = getPeerExchanges();
+        const serverPeerIds = new Set(data.peerExchanges.map((p: PeerExchangePost) => p.id));
+        const unsyncedPeer = currentPeer.filter(p => !serverPeerIds.has(p.id));
+        for (const un of unsyncedPeer) {
+          fetch('/api/peer-exchanges', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(un),
+          }).catch(() => {});
+        }
+        const mergedPeer = [...unsyncedPeer, ...data.peerExchanges];
+        const prevPeerStr = JSON.stringify(currentPeer.map(p => ({ id: p.id, thanks: p.thanksCount, reps: p.replies?.length })));
+        const newPeerStr = JSON.stringify(mergedPeer.map(p => ({ id: p.id, thanks: p.thanksCount, reps: p.replies?.length })));
+        if (prevPeerStr !== newPeerStr || !cachedPeerExchanges) {
+          cachedPeerExchanges = mergedPeer;
+          safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(mergedPeer));
+          window.dispatchEvent(new Event('peer-exchanges-change'));
+        }
       }
 
       // 5. User custom pins

@@ -91,6 +91,8 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
     }
   };
 
+  const safeTargetClasses = Array.isArray(doc.targetClasses) && doc.targetClasses.length > 0 ? doc.targetClasses : ['ALL'];
+
   const formatMeta = getFormatBadge(doc.fileFormat);
   const typeMeta = getDocTypeBadge(doc.docType);
 
@@ -168,14 +170,14 @@ export const DocumentCard: React.FC<DocumentCardProps> = ({
             </span>
           ) : doc.targetAudience === 'specific_class' ? (
             <span className="text-xs bg-sky-50 text-sky-900 font-bold px-2 py-0.5 rounded-md border border-sky-200">
-              🏫 قسم: {doc.targetClasses.join('، ')}
+              🏫 قسم: {safeTargetClasses.join('، ')}
             </span>
-          ) : doc.targetClasses.includes('ALL') || doc.targetAudience === 'all_students' ? (
+          ) : safeTargetClasses.includes('ALL') || doc.targetAudience === 'all_students' ? (
             <span className="text-xs bg-emerald-50 text-emerald-800 font-semibold px-2 py-0.5 rounded-md border border-emerald-200">
               🌐 جميع تلاميذ المؤسسة
             </span>
           ) : (
-            doc.targetClasses.map(cls => (
+            safeTargetClasses.map(cls => (
               <span
                 key={cls}
                 className="text-xs bg-sky-50 text-sky-800 font-semibold px-2 py-0.5 rounded-md border border-sky-200"

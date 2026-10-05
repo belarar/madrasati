@@ -55,6 +55,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
 }) => {
   const [selectedSubject, setSelectedSubject] = useState<SubjectId | 'ALL'>('ALL');
   const [selectedType, setSelectedType] = useState<string>('ALL');
+  const [scopeFilter, setScopeFilter] = useState<'all_school' | 'my_class'>('all_school');
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'documents' | 'peer_exchange' | 'announcements' | 'summons'>('documents');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
@@ -83,6 +84,22 @@ export const StudentView: React.FC<StudentViewProps> = ({
   // Filter documents meant for this student's class or "ALL"
   const studentClassId = currentUser.classId || '4AM-1';
 
+  // Count documents targeted to student's class or level
+  const myClassDocsCount = useMemo(() => {
+    const studentLevel = studentClassId.split('-')[0];
+    return documents.filter(doc => {
+      if (doc.targetAudience === 'teachers' || doc.targetAudience === 'staff') return false;
+      const targetClasses = Array.isArray(doc.targetClasses) ? doc.targetClasses : ['ALL'];
+      return (
+        targetClasses.length === 0 ||
+        targetClasses.includes('ALL') ||
+        targetClasses.includes(studentClassId) ||
+        targetClasses.includes(studentLevel) ||
+        (currentUser.className && targetClasses.some(c => currentUser.className?.includes(c)))
+      );
+    }).length;
+  }, [documents, studentClassId, currentUser.className]);
+
   const relevantDocuments = useMemo(() => {
     return documents.filter(doc => {
       // Check Target Audience
@@ -96,10 +113,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
         const matchesId = doc.targetStudentId && doc.targetStudentId === currentUser.identifier;
         const matchesName = doc.targetStudentName && currentUser.name && doc.targetStudentName.trim() === currentUser.name.trim();
         if (!matchesId && !matchesName) return false;
-      } else if (doc.targetAudience === 'specific_class') {
-        if (!targetClasses.includes(studentClassId) && !targetClasses.includes('ALL')) return false;
-      } else {
-        // Must be targeted to student's class, level, or "ALL"
+      }
+
+      // If scopeFilter is 'my_class', only include if targeted to student's class, level, or ALL
+      if (scopeFilter === 'my_class') {
         const studentLevel = studentClassId.split('-')[0]; // e.g. '4AM'
         const isTargeted =
           targetClasses.length === 0 ||
@@ -125,14 +142,14 @@ export const StudentView: React.FC<StudentViewProps> = ({
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase();
         const matchesTitle = doc.title.toLowerCase().includes(q);
-        const matchesDesc = doc.description.toLowerCase().includes(q);
+        const matchesDesc = doc.description?.toLowerCase().includes(q);
         const matchesAuthor = doc.authorName.toLowerCase().includes(q);
         if (!matchesTitle && !matchesDesc && !matchesAuthor) return false;
       }
 
       return true;
     });
-  }, [documents, studentClassId, currentUser.className, selectedSubject, selectedType, searchQuery]);
+  }, [documents, scopeFilter, studentClassId, currentUser.className, currentUser.identifier, currentUser.name, selectedSubject, selectedType, searchQuery]);
 
   // Announcements targeted to students or all
   const studentAnnouncements = useMemo(() => {
@@ -327,6 +344,36 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 className="w-full pl-4 pr-11 py-3 rounded-xl border border-slate-200 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none transition-all placeholder:text-slate-400"
               />
               <Search className="w-5 h-5 text-slate-400 absolute right-3.5 top-3.5" />
+            </div>
+
+            {/* Scope Selector: All School vs My Class */}
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-b border-slate-100 pb-3">
+              <span className="text-xs font-bold text-slate-700 ml-1">عرض الوثائق:</span>
+              <button
+                type="button"
+                onClick={() => setScopeFilter('all_school')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  scopeFilter === 'all_school'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <BookOpen className="w-3.5 h-3.5" />
+                <span>كافة وثائق المؤسسة ({documents.length})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => setScopeFilter('my_class')}
+                className={`flex items-center gap-1.5 px-3.5 py-2 rounded-xl text-xs font-bold transition-all ${
+                  scopeFilter === 'my_class'
+                    ? 'bg-emerald-700 text-white shadow-xs'
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                }`}
+              >
+                <GraduationCap className="w-3.5 h-3.5" />
+                <span>الموجهة لقسمي فقط ({myClassDocsCount})</span>
+              </button>
             </div>
 
             {/* Subject Filters Pills */}

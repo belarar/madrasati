@@ -6,6 +6,7 @@ import {
   BookOpen,
   Building,
   CheckCircle,
+  Database,
   Download,
   Eye,
   FileCheck,
@@ -47,6 +48,7 @@ import {
 import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentCard } from '../common/DocumentCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
+import { DatabaseDebugView } from './DatabaseDebugView';
 
 interface DirectorViewProps {
   currentUser: UserProfile;
@@ -65,6 +67,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 }) => {
   const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'roster'>('announcements');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
+  const [showDebugModal, setShowDebugModal] = useState(false);
 
   // New Announcement Form State
   const [annTitle, setAnnTitle] = useState('');
@@ -340,6 +343,18 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>دليل الطاقم التربوي والأقسام</span>
+          </button>
+        </div>
+
+        {/* Diagnostic Storage Debug Button */}
+        <div className="flex items-center gap-2 shrink-0">
+          <button
+            onClick={() => setShowDebugModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs active:scale-95 cursor-pointer"
+            title="فحص محتويات localStorage والبيانات الخام وتشخيص مشاكل التخزين"
+          >
+            <Database className="w-4 h-4 text-amber-700" />
+            <span>فحص قاعدة البيانات (Debug View)</span>
           </button>
         </div>
       </div>
@@ -942,6 +957,13 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       <DocumentPreviewModal
         doc={previewDoc}
         onClose={() => setPreviewDoc(null)}
+      />
+
+      {/* Database Diagnostics & Storage Debug Modal */}
+      <DatabaseDebugView
+        isOpen={showDebugModal}
+        onClose={() => setShowDebugModal(false)}
+        onRefreshData={onRefreshData}
       />
     </div>
   );

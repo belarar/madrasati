@@ -146,6 +146,18 @@ app.get('/api/health', (req, res) => {
 });
 
 // 2. Comprehensive Bi-Directional Multi-Device Sync
+app.get('/api/sync', (req, res) => {
+  res.json({
+    documents: db.documents,
+    announcements: db.announcements,
+    summons: db.summons,
+    peerExchanges: db.peerExchanges,
+    notifications: db.notifications,
+    userCustomPins: db.userCustomPins,
+    serverTime: new Date().toISOString(),
+  });
+});
+
 app.post('/api/sync', (req, res) => {
   const {
     clientDocs = [],
