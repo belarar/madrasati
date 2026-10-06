@@ -1,0 +1,125 @@
+{
+  "entities": {
+    "Document": {
+      "title": "Document",
+      "description": "Educational document, lesson, homework, or circular uploaded by teachers or administration",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "description": { "type": "string" },
+        "subject": { "type": "string" },
+        "docType": { "type": "string" },
+        "fileFormat": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "fileDataUrl": { "type": "string" },
+        "authorId": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "targetClasses": { "type": "string" },
+        "targetAudience": { "type": "string" },
+        "targetLevel": { "type": "string" },
+        "uploadDate": { "type": "string" },
+        "downloadCount": { "type": "number" }
+      },
+      "required": ["title", "subject", "authorName", "uploadDate"]
+    },
+    "Announcement": {
+      "title": "Announcement",
+      "description": "Official institutional announcement",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "target": { "type": "string" },
+        "priority": { "type": "string" },
+        "authorName": { "type": "string" },
+        "authorRole": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "badge": { "type": "string" },
+        "views": { "type": "number" }
+      },
+      "required": ["title", "content", "createdAt"]
+    },
+    "Summon": {
+      "title": "Summon",
+      "description": "Official parent summon notice",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "studentClass": { "type": "string" },
+        "parentName": { "type": "string" },
+        "reason": { "type": "string" },
+        "appointmentDate": { "type": "string" },
+        "appointmentTime": { "type": "string" },
+        "issuedBy": { "type": "string" },
+        "issuerRole": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["studentName", "reason", "appointmentDate", "createdAt"]
+    },
+    "Notification": {
+      "title": "Notification",
+      "description": "Application alert and notification",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "message": { "type": "string" },
+        "targetRole": { "type": "string" },
+        "targetClassId": { "type": "string" },
+        "sourceAuthorName": { "type": "string" },
+        "sourceId": { "type": "string" },
+        "createdAt": { "type": "string" }
+      },
+      "required": ["title", "message", "createdAt"]
+    },
+    "PeerExchange": {
+      "title": "PeerExchange",
+      "description": "Solidarity and peer exchange post between students in the same class",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "classId": { "type": "string" },
+        "className": { "type": "string" },
+        "studentId": { "type": "string" },
+        "studentName": { "type": "string" },
+        "subjectId": { "type": "string" },
+        "type": { "type": "string" },
+        "title": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "thanksCount": { "type": "number" }
+      },
+      "required": ["classId", "studentId", "title", "content", "createdAt"]
+    }
+  },
+  "firestore": {
+    "/documents/{documentId}": {
+      "schema": { "$ref": "#/entities/Document" },
+      "description": "Collection of educational documents"
+    },
+    "/announcements/{announcementId}": {
+      "schema": { "$ref": "#/entities/Announcement" },
+      "description": "Collection of official school announcements"
+    },
+    "/summons/{summonId}": {
+      "schema": { "$ref": "#/entities/Summon" },
+      "description": "Collection of parent summons"
+    },
+    "/notifications/{notificationId}": {
+      "schema": { "$ref": "#/entities/Notification" },
+      "description": "Collection of notifications"
+    },
+    "/peerExchanges/{peerExchangeId}": {
+      "schema": { "$ref": "#/entities/PeerExchange" },
+      "description": "Collection of peer exchange posts"
+    }
+  }
+}

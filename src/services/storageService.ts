@@ -21,6 +21,19 @@ import {
 } from '../types';
 import { OFFICIAL_STUDENTS_LIST, toUserProfile } from '../data/officialStudents';
 import { OFFICIAL_STAFF_LIST, toStaffUserProfile } from '../data/officialStaff';
+import {
+  deleteAnnouncementFromFirestore,
+  deleteDocumentFromFirestore,
+  deletePeerPostFromFirestore,
+  deleteSummonFromFirestore,
+  incrementDownloadCountInFirestore,
+  initFirestoreRealtimeSync,
+  saveAnnouncementToFirestore,
+  saveDocumentToFirestore,
+  savePeerPostToFirestore,
+  saveSummonToFirestore,
+  seedInitialFirestoreData,
+} from './firestoreService';
 
 export const STORAGE_KEYS = {
   CURRENT_USER: 'ben_naama_current_user',
@@ -86,6 +99,59 @@ export function initStorage(): void {
         window.dispatchEvent(new Event('auth-change'));
       }
     });
+  }
+
+  // Start real-time Firestore Cloud Database Synchronization
+  try {
+    initFirestoreRealtimeSync({
+      onDocuments: (liveDocs) => {
+        if (Array.isArray(liveDocs)) {
+          const prev = cachedDocuments || [];
+          const merged = liveDocs.map(doc => {
+            const local = prev.find(p => p.id === doc.id);
+            if (local?.fileDataUrl && !doc.fileDataUrl) {
+              return { ...doc, fileDataUrl: local.fileDataUrl };
+            }
+            return doc;
+          });
+          cachedDocuments = merged;
+          safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(merged));
+          window.dispatchEvent(new Event('documents-change'));
+        }
+      },
+      onAnnouncements: (liveAnns) => {
+        if (Array.isArray(liveAnns)) {
+          cachedAnnouncements = liveAnns;
+          safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(liveAnns));
+          window.dispatchEvent(new Event('announcements-change'));
+        }
+      },
+      onSummons: (liveSummons) => {
+        if (Array.isArray(liveSummons)) {
+          cachedSummons = liveSummons;
+          safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(liveSummons));
+          window.dispatchEvent(new Event('summons-change'));
+        }
+      },
+      onPeerExchanges: (livePosts) => {
+        if (Array.isArray(livePosts)) {
+          cachedPeerExchanges = livePosts;
+          safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(livePosts));
+          window.dispatchEvent(new Event('peer-exchanges-change'));
+        }
+      },
+      onNotifications: (liveNotifs) => {
+        if (Array.isArray(liveNotifs)) {
+          safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(liveNotifs));
+          window.dispatchEvent(new Event('notifications-change'));
+        }
+      },
+    });
+
+    // Seed baseline data to cloud database if empty
+    seedInitialFirestoreData(getDocuments(), getAnnouncements()).catch(() => {});
+  } catch (err) {
+    console.debug('[Firestore] Sync init note:', err);
   }
 
   // Start real-time server synchronization across devices
@@ -487,7 +553,12 @@ export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'do
   safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
 
-  // Sync to backend across all devices
+  // 1. Direct Cloud Database Save (Firebase Firestore)
+  saveDocumentToFirestore(newDoc).catch(err => {
+    console.warn('[Firestore] Cloud save document error:', err);
+  });
+
+  // 2. Sync to local backend server
   fetch('/api/documents', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -513,6 +584,12 @@ export function deleteDocument(docId: string): void {
   safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
 
+  // 1. Direct Cloud Database Delete (Firebase Firestore)
+  deleteDocumentFromFirestore(docId).catch(err => {
+    console.warn('[Firestore] Cloud delete document error:', err);
+  });
+
+  // 2. Delete from server
   fetch('/api/documents/' + encodeURIComponent(docId), {
     method: 'DELETE',
   }).catch(() => {});
@@ -520,10 +597,15 @@ export function deleteDocument(docId: string): void {
 
 export function incrementDownloadCount(docId: string): void {
   const docs = getDocuments();
+  const targetDoc = docs.find(d => d.id === docId);
   const updated = docs.map(d => (d.id === docId ? { ...d, downloadCount: (d.downloadCount || 0) + 1 } : d));
   cachedDocuments = updated;
   safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
+
+  if (targetDoc) {
+    incrementDownloadCountInFirestore(docId, targetDoc.downloadCount || 0);
+  }
 }
 
 // Real downloadable file generator & streaming server downloader
@@ -584,6 +666,12 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
   safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
 
+  // 1. Direct Cloud Database Save (Firebase Firestore)
+  saveAnnouncementToFirestore(newAnn).catch(err => {
+    console.warn('[Firestore] Cloud save announcement error:', err);
+  });
+
+  // 2. Local server sync
   fetch('/api/announcements', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -600,6 +688,12 @@ export function deleteAnnouncement(annId: string): void {
   safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
 
+  // 1. Direct Cloud Database Delete
+  deleteAnnouncementFromFirestore(annId).catch(err => {
+    console.warn('[Firestore] Cloud delete announcement error:', err);
+  });
+
+  // 2. Local server delete
   fetch('/api/announcements/' + encodeURIComponent(annId), {
     method: 'DELETE',
   }).catch(() => {});
@@ -638,6 +732,12 @@ export function saveSummon(summon: Omit<ParentSummon, 'id' | 'issuedAt' | 'statu
   safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
   window.dispatchEvent(new Event('summons-change'));
 
+  // 1. Direct Cloud Database Save
+  saveSummonToFirestore(newSummon).catch(err => {
+    console.warn('[Firestore] Cloud save summon error:', err);
+  });
+
+  // 2. Local server sync
   fetch('/api/summons', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -647,6 +747,24 @@ export function saveSummon(summon: Omit<ParentSummon, 'id' | 'issuedAt' | 'statu
   return newSummon;
 }
 
+export function deleteSummon(summonId: string): void {
+  const summons = getSummons();
+  const updated = summons.filter(s => s.id !== summonId);
+  cachedSummons = updated;
+  safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('summons-change'));
+
+  // 1. Direct Cloud Database Delete
+  deleteSummonFromFirestore(summonId).catch(err => {
+    console.warn('[Firestore] Cloud delete summon error:', err);
+  });
+
+  // 2. Local server delete
+  fetch('/api/summons/' + encodeURIComponent(summonId), {
+    method: 'DELETE',
+  }).catch(() => {});
+}
+
 export function updateSummonStatus(summonId: string, status: ParentSummon['status']): void {
   const summons = getSummons();
   const updated = summons.map(s => (s.id === summonId ? { ...s, status } : s));
@@ -654,11 +772,10 @@ export function updateSummonStatus(summonId: string, status: ParentSummon['statu
   safeSetItem(STORAGE_KEYS.SUMMONS, JSON.stringify(updated));
   window.dispatchEvent(new Event('summons-change'));
 
-  fetch('/api/summons/' + encodeURIComponent(summonId), {
-    method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ status }),
-  }).catch(() => {});
+  const target = updated.find(s => s.id === summonId);
+  if (target) {
+    saveSummonToFirestore(target).catch(() => {});
+  }
 
   fetch('/api/summons/' + encodeURIComponent(summonId), {
     method: 'PATCH',
@@ -1015,6 +1132,12 @@ export function savePeerExchange(
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(updated));
   window.dispatchEvent(new Event('peer-exchanges-change'));
 
+  // 1. Direct Cloud Database Save
+  savePeerPostToFirestore(newPost).catch(err => {
+    console.warn('[Firestore] Cloud save peer post error:', err);
+  });
+
+  // 2. Local server sync
   fetch('/api/peer-exchanges', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1033,6 +1156,12 @@ export function deletePeerExchange(postId: string): boolean {
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(updated));
   window.dispatchEvent(new Event('peer-exchanges-change'));
 
+  // 1. Direct Cloud Database Delete
+  deletePeerPostFromFirestore(postId).catch(err => {
+    console.warn('[Firestore] Cloud delete peer post error:', err);
+  });
+
+  // 2. Local server delete
   fetch('/api/peer-exchanges/' + encodeURIComponent(postId), {
     method: 'DELETE',
   }).catch(() => {});
@@ -1058,6 +1187,10 @@ export function thankPeerExchange(postId: string, studentId: string): PeerExchan
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(current));
   window.dispatchEvent(new Event('peer-exchanges-change'));
 
+  // 1. Direct Cloud Database Update
+  savePeerPostToFirestore(updatedPost).catch(() => {});
+
+  // 2. Local server sync
   fetch(`/api/peer-exchanges/${encodeURIComponent(postId)}/thank`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1089,6 +1222,10 @@ export function addPeerExchangeReply(
   safeSetItem(STORAGE_KEYS.PEER_EXCHANGES, JSON.stringify(current));
   window.dispatchEvent(new Event('peer-exchanges-change'));
 
+  // 1. Direct Cloud Database Update
+  savePeerPostToFirestore(updatedPost).catch(() => {});
+
+  // 2. Local server sync
   fetch('/api/peer-exchanges/' + encodeURIComponent(postId) + '/reply', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
