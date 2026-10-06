@@ -14,8 +14,11 @@ import {
   FileText,
   FileUp,
   Layers,
+  Megaphone,
+  Paperclip,
   Plus,
   Send,
+  Shield,
   Trash2,
   Upload,
   UserCheck,
@@ -23,8 +26,16 @@ import {
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SUBJECTS } from '../../data/mockData';
-import { deleteDocument, saveDocument, syncWithServer } from '../../services/storageService';
 import {
+  deleteAnnouncement,
+  deleteDocument,
+  saveAnnouncement,
+  saveDocument,
+  syncWithServer,
+} from '../../services/storageService';
+import {
+  AnnouncementPriority,
+  AnnouncementTarget,
   DocType,
   EducationLevel,
   FileFormat,
@@ -51,7 +62,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   announcements,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'upload' | 'my-docs' | 'announcements'>('upload');
+  const [activeTab, setActiveTab] = useState<'upload' | 'my-docs' | 'admin-docs' | 'announcements'>('upload');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
 
   // New Document Form States
@@ -83,10 +94,124 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   );
   const totalDownloads = myDocs.reduce((acc, d) => acc + (d.downloadCount || 0), 0);
 
-  // Announcements targeted to teachers or all
-  const teacherAnnouncements = announcements.filter(
-    a => a.target === 'teachers' || a.target === 'all'
+  // Administrative documents and circulars from the Director or targeted to teachers
+  const adminDocs = documents.filter(
+    d =>
+      d.authorRole === 'director' ||
+      d.subject === 'admin' ||
+      d.targetAudience === 'teachers'
   );
+
+  // Announcements targeted to teachers, all, or published by this teacher
+  const teacherAnnouncements = announcements.filter(
+    a => a.target === 'teachers' || a.target === 'all' || a.authorName?.includes(currentUser.name)
+  );
+
+  // Teacher New Announcement Form States
+  const [showTeacherAnnForm, setShowTeacherAnnForm] = useState(false);
+  const [teacherAnnTitle, setTeacherAnnTitle] = useState('');
+  const [teacherAnnContent, setTeacherAnnContent] = useState('');
+  const [teacherAnnPriority, setTeacherAnnPriority] = useState<AnnouncementPriority>('normal');
+  const [teacherAnnTarget, setTeacherAnnTarget] = useState<AnnouncementTarget>('students');
+  const [teacherAnnFile, setTeacherAnnFile] = useState<{
+    name: string;
+    size: string;
+    format: FileFormat;
+    dataUrl?: string;
+  } | null>(null);
+  const [teacherAnnSuccess, setTeacherAnnSuccess] = useState<string | null>(null);
+  const teacherAnnFileRef = useRef<HTMLInputElement>(null);
+
+  const handleTeacherAnnFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    let format: FileFormat = 'pdf';
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') format = 'pdf';
+    else if (ext === 'docx' || ext === 'doc') format = 'docx';
+    else if (ext === 'xlsx' || ext === 'xls') format = 'xlsx';
+    else if (ext === 'pptx' || ext === 'ppt') format = 'pptx';
+    else if (file.type.startsWith('image/')) format = 'image';
+
+    try {
+      const processed = await processAndCompressFile(file);
+      setTeacherAnnFile({
+        name: processed.name,
+        size: processed.sizeFormatted,
+        format,
+        dataUrl: processed.dataUrl,
+      });
+    } catch {
+      const formattedSize =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.round(file.size / 1024)} KB`;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setTeacherAnnFile({
+          name: file.name,
+          size: formattedSize,
+          format,
+          dataUrl: reader.result as string,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handleCreateTeacherAnn = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!teacherAnnTitle.trim() || !teacherAnnContent.trim()) return;
+
+    saveAnnouncement({
+      title: teacherAnnTitle.trim(),
+      content: teacherAnnContent.trim(),
+      target: teacherAnnTarget,
+      priority: teacherAnnPriority,
+      authorName: `${currentUser.name} (أستاذة ${currentUser.title || 'المادة'})`,
+      authorRole: 'teacher',
+      badge: 'إعلان الأستاذ(ة)',
+      fileName: teacherAnnFile?.name,
+      fileSize: teacherAnnFile?.size,
+      fileFormat: teacherAnnFile?.format,
+      fileDataUrl: teacherAnnFile?.dataUrl,
+    });
+
+    onRefreshData();
+    setTeacherAnnSuccess('تم نشر الإعلان لتلاميذك مع المرفق بنجاح وحفظه في قاعدة البيانات!');
+    setTeacherAnnTitle('');
+    setTeacherAnnContent('');
+    setTeacherAnnFile(null);
+    if (teacherAnnFileRef.current) teacherAnnFileRef.current.value = '';
+
+    setTimeout(() => {
+      setTeacherAnnSuccess(null);
+      setShowTeacherAnnForm(false);
+    }, 2000);
+  };
+
+  const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
+    if (ann.fileName) {
+      setPreviewDoc({
+        id: ann.id,
+        title: ann.title,
+        description: ann.content,
+        subject: 'admin',
+        docType: 'circular',
+        fileFormat: ann.fileFormat || 'pdf',
+        fileName: ann.fileName,
+        fileSize: ann.fileSize || '1 MB',
+        fileDataUrl: ann.fileDataUrl,
+        authorId: 'director',
+        authorName: ann.authorName,
+        authorRole: 'director',
+        targetClasses: ['ALL'],
+        uploadDate: ann.createdAt,
+        downloadCount: 0,
+      });
+    }
+  };
 
   const handleClassToggle = (classId: string) => {
     if (selectAllClasses) {
@@ -284,6 +409,18 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
           >
             <BookOpen className="w-4 h-4" />
             <span>وثائقي المنشورة ({myDocs.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('admin-docs')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              activeTab === 'admin-docs'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Shield className="w-4 h-4 text-amber-500" />
+            <span>المناشير والمراسلات الإدارية ({adminDocs.length})</span>
           </button>
 
           <button
@@ -649,18 +786,243 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
         </div>
       )}
 
-      {/* Tab: Announcements from Director */}
-      {activeTab === 'announcements' && (
+      {/* Tab: Administrative Circulars & Documents from Director */}
+      {activeTab === 'admin-docs' && (
         <div className="space-y-4">
           <div className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
-            <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
-              <Bell className="w-5 h-5 text-emerald-700" />
-              <span>إعلانات إدارة المؤسسة والمدير الموجهة للسادة الأساتذة</span>
-            </h2>
-            <span className="text-xs text-slate-500">
-              عدد الإعلانات: {teacherAnnouncements.length}
+            <div>
+              <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <Shield className="w-5 h-5 text-emerald-700" />
+                <span>المناشير والمراسلات الإدارية الصادرة عن إدارة المؤسسة</span>
+              </h2>
+              <p className="text-xs text-slate-500">
+                المناشير الوزارية، مذكرات المصلحة، ورزنامات الامتحانات الموجهة للأساتذة.
+              </p>
+            </div>
+            <span className="text-xs font-bold text-emerald-800 bg-emerald-50 border border-emerald-200 px-3 py-1.5 rounded-xl">
+              {adminDocs.length} وثيقة ومراسلة
             </span>
           </div>
+
+          {adminDocs.length === 0 ? (
+            <div className="bg-white rounded-2xl border border-slate-200 p-10 text-center space-y-3">
+              <Shield className="w-12 h-12 text-slate-300 mx-auto" />
+              <p className="font-bold text-slate-700">لا توجد مراسلات إدارية حالياً</p>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                ستظهر هنا فورياً كافة المناشير والمذكرات الرسمية المرفوعة من طرف السيد المدير.
+              </p>
+            </div>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+              {adminDocs.map(doc => (
+                <DocumentCard
+                  key={doc.id}
+                  doc={doc}
+                  currentUser={currentUser}
+                  onPreview={d => setPreviewDoc(d)}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Tab: Announcements from Director & Teacher Notices */}
+      {activeTab === 'announcements' && (
+        <div className="space-y-4">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-col sm:flex-row sm:items-center justify-between gap-3 shadow-2xs">
+            <div>
+              <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                <Bell className="w-5 h-5 text-emerald-700" />
+                <span>لوحة الإعلانات والمراسلات المدرسية</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                تتضمن إعلانات المدير والناظر، بالإضافة إلى إمكانية نشر إعلانات وتوجيهات لتلاميذ أقسامك مع إرفاق ملفات.
+              </p>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-slate-500 bg-slate-100 px-3 py-1.5 rounded-xl font-bold">
+                إجمالي الإعلانات: {teacherAnnouncements.length}
+              </span>
+              <button
+                type="button"
+                onClick={() => setShowTeacherAnnForm(!showTeacherAnnForm)}
+                className="px-3.5 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-xs transition-all active:scale-95 cursor-pointer"
+              >
+                <Plus className="w-4 h-4" />
+                <span>{showTeacherAnnForm ? 'إلغاء' : 'نشر إعلان لتلاميذي'}</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Form to Create Teacher Announcement */}
+          {showTeacherAnnForm && (
+            <div className="bg-white rounded-3xl border border-emerald-200 p-6 shadow-sm space-y-5 animate-in fade-in">
+              <div className="border-b border-slate-100 pb-3 flex items-center justify-between">
+                <div>
+                  <h3 className="text-base font-bold text-slate-900 flex items-center gap-2">
+                    <Megaphone className="w-5 h-5 text-emerald-700" />
+                    <span>نشر إعلان أو توجيه بيداغوجي للأقسام</span>
+                  </h3>
+                  <p className="text-xs text-slate-500 mt-0.5">
+                    سيظهر هذا الإعلان فورياً في فضاء جميع تلاميذ الأقسام المعنية.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setShowTeacherAnnForm(false)}
+                  className="text-slate-400 hover:text-slate-600 p-1 rounded-lg"
+                >
+                  <X className="w-5 h-5" />
+                </button>
+              </div>
+
+              {teacherAnnSuccess && (
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center gap-2.5 text-xs font-bold">
+                  <CheckCircle className="w-4 h-4 text-emerald-600 shrink-0" />
+                  <span>{teacherAnnSuccess}</span>
+                </div>
+              )}
+
+              <form onSubmit={handleCreateTeacherAnn} className="space-y-4">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    عنوان الإعلان: <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={teacherAnnTitle}
+                    onChange={e => setTeacherAnnTitle(e.target.value)}
+                    placeholder="مثال: تقديم موعد الفرض المحروس الأول أو إحضار كراس التمارين"
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-medium"
+                  />
+                </div>
+
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      درجة الأهمية:
+                    </label>
+                    <select
+                      value={teacherAnnPriority}
+                      onChange={e => setTeacherAnnPriority(e.target.value as AnnouncementPriority)}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-emerald-600 text-slate-900 text-xs font-bold outline-none bg-white"
+                    >
+                      <option value="normal">عادي</option>
+                      <option value="important">هام</option>
+                      <option value="urgent">عاجل ومهم جداً</option>
+                    </select>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                      الفئة المستهدفة:
+                    </label>
+                    <select
+                      value={teacherAnnTarget}
+                      onChange={e => setTeacherAnnTarget(e.target.value as AnnouncementTarget)}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-emerald-600 text-slate-900 text-xs font-bold outline-none bg-white"
+                    >
+                      <option value="students">تلاميذ الأقسام المسندة</option>
+                      <option value="all">كافة أسرة المؤسسة</option>
+                    </select>
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    نص الإعلان والتفاصيل: <span className="text-red-500">*</span>
+                  </label>
+                  <textarea
+                    rows={4}
+                    required
+                    value={teacherAnnContent}
+                    onChange={e => setTeacherAnnContent(e.target.value)}
+                    placeholder="اكتب هنا تفاصيل الإعلان، التوجيهات، الملاحظات للتلاميذ..."
+                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 text-slate-900 text-xs outline-none resize-none leading-relaxed"
+                  />
+                </div>
+
+                {/* File Attachment Box */}
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+                  <div className="flex items-center justify-between">
+                    <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                      <Paperclip className="w-4 h-4 text-emerald-700" />
+                      <span>إرفاق وثيقة أو صورة مع الإعلان (اختياري - PDF / Word / صورة):</span>
+                    </label>
+                    {teacherAnnFile && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setTeacherAnnFile(null);
+                          if (teacherAnnFileRef.current) teacherAnnFileRef.current.value = '';
+                        }}
+                        className="text-xs text-red-600 hover:underline flex items-center gap-1 font-bold cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                        <span>حذف المرفق</span>
+                      </button>
+                    )}
+                  </div>
+
+                  <input
+                    ref={teacherAnnFileRef}
+                    type="file"
+                    accept=".pdf,.docx,.doc,.xlsx,.pptx,image/*"
+                    onChange={handleTeacherAnnFileChange}
+                    className="hidden"
+                  />
+
+                  {teacherAnnFile ? (
+                    <div className="flex items-center justify-between p-3 rounded-xl bg-white border border-emerald-300 shadow-2xs">
+                      <div className="flex items-center gap-2.5 min-w-0">
+                        <div className="w-8 h-8 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                          <FileCheck className="w-4 h-4" />
+                        </div>
+                        <div className="min-w-0">
+                          <p className="text-xs font-bold text-slate-800 truncate">{teacherAnnFile.name}</p>
+                          <p className="text-[10px] text-slate-500 font-medium">{teacherAnnFile.size}</p>
+                        </div>
+                      </div>
+                      <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-0.5 rounded-lg shrink-0">
+                        جاهز للنشر ✓
+                      </span>
+                    </div>
+                  ) : (
+                    <div
+                      onClick={() => teacherAnnFileRef.current?.click()}
+                      className="border-2 border-dashed border-slate-300 hover:border-emerald-600 rounded-xl p-4 text-center cursor-pointer transition-all bg-white hover:bg-emerald-50/20"
+                    >
+                      <Paperclip className="w-5 h-5 text-slate-400 mx-auto mb-1" />
+                      <p className="text-xs font-bold text-slate-700">
+                        انقر هنا لإرفاق وثيقة أو بطاقة أو واجب مع الإعلان
+                      </p>
+                      <p className="text-[10px] text-slate-500">يدعم PDF و Word والصور</p>
+                    </div>
+                  )}
+                </div>
+
+                <div className="flex items-center justify-end gap-2 pt-1">
+                  <button
+                    type="button"
+                    onClick={() => setShowTeacherAnnForm(false)}
+                    className="px-4 py-2 rounded-xl border border-slate-200 text-slate-600 text-xs font-bold hover:bg-slate-50 cursor-pointer"
+                  >
+                    إلغاء
+                  </button>
+                  <button
+                    type="submit"
+                    className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all active:scale-95"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                    <span>نشر الإعلان فورياً لتلاميذك</span>
+                  </button>
+                </div>
+              </form>
+            </div>
+          )}
 
           <div className="space-y-4">
             {teacherAnnouncements.map(ann => (
@@ -668,6 +1030,13 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
                 key={ann.id}
                 announcement={ann}
                 currentUser={currentUser}
+                onPreviewAttachment={handlePreviewAnnAttachment}
+                onDelete={id => {
+                  if (window.confirm('هل تريد حذف هذا الإعلان؟')) {
+                    deleteAnnouncement(id);
+                    onRefreshData();
+                  }
+                }}
               />
             ))}
           </div>

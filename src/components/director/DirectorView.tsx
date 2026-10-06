@@ -16,6 +16,7 @@ import {
   FolderOpen,
   GraduationCap,
   Megaphone,
+  Paperclip,
   Plus,
   Send,
   Shield,
@@ -39,6 +40,7 @@ import {
   AnnouncementPriority,
   AnnouncementTarget,
   DocType,
+  DocumentTargetAudience,
   FileFormat,
   ParentSummon,
   SchoolAnnouncement,
@@ -50,6 +52,7 @@ import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentCard } from '../common/DocumentCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { DatabaseDebugView } from './DatabaseDebugView';
+import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface DirectorViewProps {
   currentUser: UserProfile;
@@ -77,12 +80,21 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   const [annPriority, setAnnPriority] = useState<AnnouncementPriority>('important');
   const [annBadge, setAnnBadge] = useState('منشور المدير');
   const [annSuccess, setAnnSuccess] = useState<string | null>(null);
+  const [annUploadedFile, setAnnUploadedFile] = useState<{
+    name: string;
+    size: string;
+    format: FileFormat;
+    dataUrl?: string;
+  } | null>(null);
+  const annFileInputRef = useRef<HTMLInputElement>(null);
 
   // Administrative Document Upload Form State
   const [docTitle, setDocTitle] = useState('');
   const [docDescription, setDocDescription] = useState('');
   const [docFileFormat, setDocFileFormat] = useState<FileFormat>('pdf');
   const [docType, setDocType] = useState<DocType>('circular');
+  const [docAudience, setDocAudience] = useState<'all' | 'teachers' | 'students' | 'specific_class'>('all');
+  const [docSelectedClasses, setDocSelectedClasses] = useState<string[]>(['4AM-1']);
   const [uploadedFile, setUploadedFile] = useState<{ name: string; size: string; dataUrl?: string } | null>(null);
   const [docSuccess, setDocSuccess] = useState<string | null>(null);
   const [isUploading, setIsUploading] = useState(false);
@@ -105,6 +117,66 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     return a.target === filterTarget;
   });
 
+  const handleAnnFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    let format: FileFormat = 'pdf';
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') format = 'pdf';
+    else if (ext === 'docx' || ext === 'doc') format = 'docx';
+    else if (ext === 'xlsx' || ext === 'xls') format = 'xlsx';
+    else if (ext === 'pptx' || ext === 'ppt') format = 'pptx';
+    else if (file.type.startsWith('image/')) format = 'image';
+
+    try {
+      const processed = await processAndCompressFile(file);
+      setAnnUploadedFile({
+        name: processed.name,
+        size: processed.sizeFormatted,
+        format,
+        dataUrl: processed.dataUrl,
+      });
+    } catch {
+      const formattedSize =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.round(file.size / 1024)} KB`;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAnnUploadedFile({
+          name: file.name,
+          size: formattedSize,
+          format,
+          dataUrl: reader.result as string,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
+    if (ann.fileName) {
+      setPreviewDoc({
+        id: ann.id,
+        title: ann.title,
+        description: ann.content,
+        subject: 'admin',
+        docType: 'circular',
+        fileFormat: ann.fileFormat || 'pdf',
+        fileName: ann.fileName,
+        fileSize: ann.fileSize || '1 MB',
+        fileDataUrl: ann.fileDataUrl,
+        authorId: 'director',
+        authorName: ann.authorName,
+        authorRole: 'director',
+        targetClasses: ['ALL'],
+        uploadDate: ann.createdAt,
+        downloadCount: 0,
+      });
+    }
+  };
+
   const handleCreateAnnouncement = (e: React.FormEvent) => {
     e.preventDefault();
     if (!annTitle.trim() || !annContent.trim()) return;
@@ -117,13 +189,19 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       authorName: `${currentUser.name} (مدير المتوسطة)`,
       authorRole: 'director',
       badge: annBadge.trim() || 'بلاغ الإدارة',
+      fileName: annUploadedFile?.name,
+      fileSize: annUploadedFile?.size,
+      fileFormat: annUploadedFile?.format,
+      fileDataUrl: annUploadedFile?.dataUrl,
     });
 
     onRefreshData();
-    setAnnSuccess('تم نشر الإعلان بنجاح إلى الفئة المحددة!');
+    setAnnSuccess('تم نشر الإعلان مع المرفق بنجاح وحفظه في قاعدة البيانات!');
 
     setAnnTitle('');
     setAnnContent('');
+    setAnnUploadedFile(null);
+    if (annFileInputRef.current) annFileInputRef.current.value = '';
 
     setTimeout(() => {
       setAnnSuccess(null);
@@ -167,6 +245,18 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       `${docTitle.replace(/\s+/g, '_')}.${docFileFormat === 'docx' ? 'docx' : docFileFormat}`;
     const fileSize = uploadedFile?.size || '1.5 MB';
 
+    const targetAudience: DocumentTargetAudience =
+      docAudience === 'teachers'
+        ? 'teachers'
+        : docAudience === 'specific_class'
+        ? 'specific_class'
+        : 'all_students';
+
+    const targetClasses =
+      docAudience === 'specific_class' && docSelectedClasses.length > 0
+        ? docSelectedClasses
+        : ['ALL'];
+
     saveDocument({
       title: docTitle.trim(),
       description:
@@ -181,8 +271,8 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       authorId: currentUser.id,
       authorName: `${currentUser.name} (المدير)`,
       authorRole: 'director',
-      targetClasses: ['ALL'],
-      targetAudience: 'all_students',
+      targetClasses,
+      targetAudience,
     });
 
     try {
@@ -394,10 +484,10 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
             <button
               onClick={() => setActiveTab('new-announcement')}
-              className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-1.5 shadow-xs shrink-0"
+              className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs shrink-0 cursor-pointer transition-all active:scale-95"
             >
-              <Plus className="w-4 h-4" />
-              <span>إعلان جديد</span>
+              <Paperclip className="w-4 h-4 text-emerald-200" />
+              <span>نشر إعلان جديد مع إرفاق وثيقة</span>
             </button>
           </div>
 
@@ -407,6 +497,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 key={ann.id}
                 announcement={ann}
                 currentUser={currentUser}
+                onPreviewAttachment={handlePreviewAnnAttachment}
                 onDelete={id => {
                   if (window.confirm('هل تريد حذف هذا الإعلان نهائياً؟')) {
                     deleteAnnouncement(id);
@@ -533,6 +624,112 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
               />
             </div>
 
+            {/* Attachment Box for Announcements */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Paperclip className="w-4 h-4 text-emerald-700" />
+                  <span>إرفاق وثيقة أو منشور مع الإعلان (اختياري - PDF أو Word أو صورة):</span>
+                </label>
+                {annUploadedFile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnnUploadedFile(null);
+                      if (annFileInputRef.current) annFileInputRef.current.value = '';
+                    }}
+                    className="text-xs text-red-600 hover:underline flex items-center gap-1 font-bold"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>حذف المرفق</span>
+                  </button>
+                )}
+              </div>
+
+              <input
+                ref={annFileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.xlsx,.pptx,image/*"
+                onChange={handleAnnFileChange}
+                className="hidden"
+              />
+
+              {annUploadedFile ? (
+                <div className="flex items-center justify-between p-3.5 rounded-xl bg-white border border-emerald-300 shadow-2xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                      <FileCheck className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800 truncate">{annUploadedFile.name}</p>
+                      <p className="text-[11px] text-slate-500 font-medium">{annUploadedFile.size} • جاهز للنشر والمزامنة</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    {annUploadedFile.dataUrl && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPreviewDoc({
+                            id: 'temp-preview',
+                            title: annTitle || annUploadedFile.name,
+                            description: annContent || 'معاينة المرفق قبل النشر',
+                            subject: 'admin',
+                            docType: 'circular',
+                            fileFormat: annUploadedFile.format,
+                            fileName: annUploadedFile.name,
+                            fileSize: annUploadedFile.size,
+                            fileDataUrl: annUploadedFile.dataUrl,
+                            authorId: currentUser.id,
+                            authorName: currentUser.name,
+                            authorRole: 'director',
+                            targetClasses: ['ALL'],
+                            uploadDate: new Date().toISOString().split('T')[0],
+                            downloadCount: 0,
+                          });
+                        }}
+                        className="px-2.5 py-1 rounded-lg bg-emerald-50 hover:bg-emerald-100 text-emerald-800 text-xs font-bold border border-emerald-200 flex items-center gap-1 cursor-pointer transition-colors"
+                      >
+                        <Eye className="w-3.5 h-3.5" />
+                        <span>معاينة</span>
+                      </button>
+                    )}
+                    <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg shrink-0">
+                      تم إرفاق الملف ✓
+                    </span>
+                  </div>
+                </div>
+              ) : (
+                <div
+                  onClick={() => annFileInputRef.current?.click()}
+                  onDragOver={e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                  }}
+                  onDrop={async e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    const file = e.dataTransfer.files?.[0];
+                    if (file && annFileInputRef.current) {
+                      const dt = new DataTransfer();
+                      dt.items.add(file);
+                      annFileInputRef.current.files = dt.files;
+                      annFileInputRef.current.dispatchEvent(new Event('change', { bubbles: true }));
+                    }
+                  }}
+                  className="border-2 border-dashed border-emerald-400/80 hover:border-emerald-600 rounded-xl p-5 text-center cursor-pointer transition-all bg-emerald-50/20 hover:bg-emerald-50/40"
+                >
+                  <Paperclip className="w-6 h-6 text-emerald-600 mx-auto mb-1.5" />
+                  <p className="text-xs font-bold text-slate-800">
+                    انقر هنا أو اسحب الملف لإرفاق منشور وزاري، رزنامة، أو وثيقة رسمية مع الإعلان
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    يدعم ملفات PDF، Word (.docx)، والصور (سيتمكن الأساتذة والتلاميذ من تحميلها أو معاينتها فورياً)
+                  </p>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
@@ -627,6 +824,71 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                   </button>
                 </div>
               </div>
+            </div>
+
+            {/* Target Audience for Administrative Document */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                الفئة المستهدفة بالوثيقة الإدارية:
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'all', label: 'كافة أسرة المؤسسة', desc: 'الأساتذة والتلاميذ معاً' },
+                  { id: 'teachers', label: 'السادة الأساتذة فقط', desc: 'تعليمات ومذكرات مصلحة' },
+                  { id: 'students', label: 'كافة التلاميذ فقط', desc: 'توجيهات واستمارات' },
+                  { id: 'specific_class', label: 'أقسام محددة', desc: 'تحديد قسم أو أكثر' },
+                ].map(item => {
+                  const isSelected = docAudience === item.id;
+                  return (
+                    <button
+                      key={item.id}
+                      type="button"
+                      onClick={() => setDocAudience(item.id as any)}
+                      className={`p-2.5 rounded-xl border text-right transition-all ${
+                        isSelected
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-900 ring-2 ring-emerald-500/20'
+                          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="font-bold text-xs">{item.label}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{item.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              {docAudience === 'specific_class' && (
+                <div className="mt-3 p-3 rounded-xl bg-slate-50 border border-slate-200 space-y-2">
+                  <span className="text-xs font-bold text-slate-700 block">حدد الأقسام المعنية بالوثيقة:</span>
+                  <div className="flex flex-wrap gap-1.5">
+                    {SCHOOL_CLASSES.map(cls => {
+                      const isChecked = docSelectedClasses.includes(cls.id);
+                      return (
+                        <button
+                          key={cls.id}
+                          type="button"
+                          onClick={() => {
+                            if (isChecked) {
+                              if (docSelectedClasses.length > 1) {
+                                setDocSelectedClasses(docSelectedClasses.filter(c => c !== cls.id));
+                              }
+                            } else {
+                              setDocSelectedClasses([...docSelectedClasses, cls.id]);
+                            }
+                          }}
+                          className={`px-2.5 py-1 rounded-lg text-xs font-bold border transition-all ${
+                            isChecked
+                              ? 'bg-emerald-700 text-white border-emerald-700'
+                              : 'bg-white text-slate-700 border-slate-300 hover:border-slate-400'
+                          }`}
+                        >
+                          {cls.name.split('(')[0].trim()}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
             </div>
 
             {/* Upload Box */}

@@ -83,10 +83,14 @@ export interface SchoolAnnouncement {
   targetClass?: string; // Optional: specific class
   priority: AnnouncementPriority;
   authorName: string;
-  authorRole: 'director' | 'censor';
+  authorRole: 'director' | 'censor' | 'teacher';
   createdAt: string;
   badge?: string;
   views?: number;
+  fileName?: string;
+  fileSize?: string;
+  fileFormat?: FileFormat;
+  fileDataUrl?: string;
 }
 
 export type SummonReason =

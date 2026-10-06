@@ -182,6 +182,28 @@ export const StudentView: React.FC<StudentViewProps> = ({
     );
   }, [announcements]);
 
+  const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
+    if (ann.fileName) {
+      setPreviewDoc({
+        id: ann.id,
+        title: ann.title,
+        description: ann.content,
+        subject: 'admin',
+        docType: 'circular',
+        fileFormat: ann.fileFormat || 'pdf',
+        fileName: ann.fileName,
+        fileSize: ann.fileSize || '1 MB',
+        fileDataUrl: ann.fileDataUrl,
+        authorId: 'director',
+        authorName: ann.authorName,
+        authorRole: 'director',
+        targetClasses: ['ALL'],
+        uploadDate: ann.createdAt,
+        downloadCount: 0,
+      });
+    }
+  };
+
   // Summons for this specific student by identifier or name
   const studentSummons = useMemo(() => {
     return summons.filter(
@@ -542,6 +564,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 key={ann.id}
                 announcement={ann}
                 currentUser={currentUser}
+                onPreviewAttachment={handlePreviewAnnAttachment}
               />
             ))}
           </div>

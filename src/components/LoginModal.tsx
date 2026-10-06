@@ -619,11 +619,63 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       setResetEmail('');
                       setError(null);
                     }}
-                    className="text-xs text-slate-600 hover:text-emerald-800 font-semibold inline-flex items-center gap-1.5 transition-colors"
+                    className="text-xs text-slate-600 hover:text-emerald-800 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
                   >
                     <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
                     <span>هل نسيت كلمة السر؟ انقر هنا لتحديث وتعيين كلمة سر جديدة فوراً</span>
                   </button>
+                </div>
+
+                {/* Instant Testing Buttons */}
+                <div className="pt-3 border-t border-slate-200 space-y-2">
+                  <p className="text-[11px] font-bold text-slate-500 text-center">
+                    🧪 دخول سريع فوري ومباشر لتجريب ومحاكاة الأدوار:
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const demoDirector: UserProfile = {
+                          id: 'staff-1097448010036800',
+                          identifier: '1097448010036800',
+                          name: 'عدة عمار عبد القادر',
+                          role: 'director',
+                          title: 'مدير متوسطة الشهيد بن نعمة مصطفى',
+                        };
+                        registerNewUser(demoDirector);
+                        setCurrentUser(demoDirector);
+                        onLoginSuccess(demoDirector);
+                        onClose();
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <Building className="w-4 h-4 text-purple-700" />
+                      <span>دخول تجريبي كمدير المتوسطة</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const demoTeacher: UserProfile = {
+                          id: 'staff-1197348010089800',
+                          identifier: '1197348010089800',
+                          name: 'حمزة نفيسة',
+                          role: 'teacher',
+                          subjects: ['english'],
+                          title: 'أستاذة التعليم المتوسط - اللغة الإنجليزية',
+                          assignedClasses: ['4AM-1', '4AM-2', '3AM-1', '3AM-2', '2AM-1', '1AM-1'],
+                        };
+                        registerNewUser(demoTeacher);
+                        setCurrentUser(demoTeacher);
+                        onLoginSuccess(demoTeacher);
+                        onClose();
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-bold border border-blue-200 flex items-center justify-center gap-2 cursor-pointer transition-colors"
+                    >
+                      <Sparkles className="w-4 h-4 text-blue-700" />
+                      <span>دخول تجريبي كأستاذة مادة</span>
+                    </button>
+                  </div>
                 </div>
               </form>
             </div>

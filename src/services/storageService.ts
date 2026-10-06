@@ -121,8 +121,16 @@ export function initStorage(): void {
       },
       onAnnouncements: (liveAnns) => {
         if (Array.isArray(liveAnns)) {
-          cachedAnnouncements = liveAnns;
-          safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(liveAnns));
+          const prev = cachedAnnouncements || [];
+          const merged = liveAnns.map(ann => {
+            const local = prev.find(p => p.id === ann.id);
+            if (local?.fileDataUrl && !ann.fileDataUrl) {
+              return { ...ann, fileDataUrl: local.fileDataUrl };
+            }
+            return ann;
+          });
+          cachedAnnouncements = merged;
+          safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(merged));
           window.dispatchEvent(new Event('announcements-change'));
         }
       },
@@ -472,7 +480,7 @@ export function safeSetItem(key: string, value: string): boolean {
   if (typeof window === 'undefined') return false;
   try {
     let toStore = value;
-    if (key === STORAGE_KEYS.DOCUMENTS) {
+    if (key === STORAGE_KEYS.DOCUMENTS || key === STORAGE_KEYS.ANNOUNCEMENTS) {
       try {
         const parsed = JSON.parse(value);
         if (Array.isArray(parsed)) {
@@ -631,6 +639,54 @@ export function downloadFile(doc: SchoolDocument): void {
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
+}
+
+// Download announcement attachment
+export function downloadAnnouncementAttachment(ann: SchoolAnnouncement): void {
+  if (ann.fileDataUrl && ann.fileDataUrl.startsWith('data:')) {
+    const a = document.createElement('a');
+    a.href = ann.fileDataUrl;
+    a.download = ann.fileName || `${ann.title}.${ann.fileFormat || 'pdf'}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    return;
+  }
+
+  // Fallback: create official formatted document file
+  const docContent = `الجمهورية الجزائرية الديمقراطية الشعبية
+وزارة التربية الوطنية
+متوسطة الشهيد بن نعمة مصطفى - وادي ارهيو (ولاية غليزان)
+----------------------------------------------------------------------
+وثيقة رسمية ومرفق إداري: ${ann.title}
+تاريخ الصدور: ${new Date(ann.createdAt).toLocaleDateString('ar-DZ')}
+جهة الإصدار: ${ann.authorName} (${ann.authorRole === 'director' ? 'مدير المؤسسة' : 'إدارة المؤسسة'})
+الفئة المستهدفة: ${
+    ann.target === 'students'
+      ? 'التلاميذ'
+      : ann.target === 'teachers'
+      ? 'السادة الأساتذة'
+      : ann.target === 'staff'
+      ? 'الموظفون والعمال'
+      : 'كافة أسرة المؤسسة'
+  }
+درجة الأهمية: ${ann.priority === 'urgent' ? 'عاجل جداً' : ann.priority === 'important' ? 'هام' : 'عادي'}
+----------------------------------------------------------------------
+نص المنشور والتعليمات الرسمية:
+${ann.content}
+
+----------------------------------------------------------------------
+ملاحظة: هذه الوثيقة صادرة رقمياً عبر الأرضية الرسمية لمتوسطة الشهيد بن نعمة مصطفى.`;
+
+  const blob = new Blob([docContent], { type: 'text/plain;charset=utf-8' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = ann.fileName || `${ann.title.replace(/\s+/g, '_')}.txt`;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 2000);
 }
 
 // Announcements

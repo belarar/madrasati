@@ -39,7 +39,11 @@
         "authorRole": { "type": "string" },
         "createdAt": { "type": "string" },
         "badge": { "type": "string" },
-        "views": { "type": "number" }
+        "views": { "type": "number" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "fileFormat": { "type": "string" },
+        "fileDataUrl": { "type": "string" }
       },
       "required": ["title", "content", "createdAt"]
     },

@@ -201,7 +201,11 @@ export async function incrementDownloadCountInFirestore(docId: string, currentCo
 
 export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Promise<void> {
   const annRef = doc(firestore, 'announcements', ann.id);
-  await setDoc(annRef, ann, { merge: true });
+  const payload = { ...ann };
+  if (payload.fileDataUrl && payload.fileDataUrl.length > 750000) {
+    payload.fileDataUrl = undefined;
+  }
+  await setDoc(annRef, payload, { merge: true });
 }
 
 export async function deleteAnnouncementFromFirestore(annId: string): Promise<void> {

@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   AlertCircle,
   Bell,
@@ -7,10 +7,12 @@ import {
   Clock,
   ExternalLink,
   Eye,
+  FileCheck,
   FileText,
   Filter,
   Megaphone,
   MessageCircle,
+  Paperclip,
   Phone,
   Plus,
   Printer,
@@ -18,6 +20,7 @@ import {
   Send,
   Shield,
   Trash2,
+  Upload,
   User,
   Users,
 } from 'lucide-react';
@@ -31,13 +34,18 @@ import {
 } from '../../services/storageService';
 import {
   AnnouncementPriority,
+  AnnouncementTarget,
+  FileFormat,
   ParentSummon,
   SchoolAnnouncement,
+  SchoolDocument,
   SummonReason,
   UserProfile,
 } from '../../types';
 import { AnnouncementCard } from '../common/AnnouncementCard';
+import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { SummonModal } from '../common/SummonModal';
+import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface CensorViewProps {
   currentUser: UserProfile;
@@ -69,12 +77,83 @@ export const CensorView: React.FC<CensorViewProps> = ({
   const [appointmentTime, setAppointmentTime] = useState('10:00 صباحاً');
   const [summonSuccess, setSummonSuccess] = useState<string | null>(null);
 
+  // Preview Document Modal State
+  const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
+
   // New Announcement Form
   const [annTitle, setAnnTitle] = useState('');
   const [annContent, setAnnContent] = useState('');
+  const [annTarget, setAnnTarget] = useState<AnnouncementTarget>('students');
   const [annPriority, setAnnPriority] = useState<AnnouncementPriority>('important');
   const [annBadge, setAnnBadge] = useState('إعلان الناظر');
   const [annSuccess, setAnnSuccess] = useState<string | null>(null);
+  const [annUploadedFile, setAnnUploadedFile] = useState<{
+    name: string;
+    size: string;
+    format: FileFormat;
+    dataUrl?: string;
+  } | null>(null);
+  const annFileInputRef = useRef<HTMLInputElement>(null);
+
+  const handleAnnFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    let format: FileFormat = 'pdf';
+    const ext = file.name.split('.').pop()?.toLowerCase();
+    if (ext === 'pdf') format = 'pdf';
+    else if (ext === 'docx' || ext === 'doc') format = 'docx';
+    else if (ext === 'xlsx' || ext === 'xls') format = 'xlsx';
+    else if (ext === 'pptx' || ext === 'ppt') format = 'pptx';
+    else if (file.type.startsWith('image/')) format = 'image';
+
+    try {
+      const processed = await processAndCompressFile(file);
+      setAnnUploadedFile({
+        name: processed.name,
+        size: processed.sizeFormatted,
+        format,
+        dataUrl: processed.dataUrl,
+      });
+    } catch {
+      const formattedSize =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.round(file.size / 1024)} KB`;
+      const reader = new FileReader();
+      reader.onload = () => {
+        setAnnUploadedFile({
+          name: file.name,
+          size: formattedSize,
+          format,
+          dataUrl: reader.result as string,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
+  };
+
+  const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
+    if (ann.fileName) {
+      setPreviewDoc({
+        id: ann.id,
+        title: ann.title,
+        description: ann.content,
+        subject: 'admin',
+        docType: 'circular',
+        fileFormat: ann.fileFormat || 'pdf',
+        fileName: ann.fileName,
+        fileSize: ann.fileSize || '1 MB',
+        fileDataUrl: ann.fileDataUrl,
+        authorId: 'censor',
+        authorName: ann.authorName,
+        authorRole: 'censor',
+        targetClasses: ['ALL'],
+        uploadDate: ann.createdAt,
+        downloadCount: 0,
+      });
+    }
+  };
 
   // Search & Filters for summons
   const [summonSearch, setSummonSearch] = useState('');
@@ -134,18 +213,24 @@ export const CensorView: React.FC<CensorViewProps> = ({
     saveAnnouncement({
       title: annTitle.trim(),
       content: annContent.trim(),
-      target: 'students',
+      target: annTarget,
       priority: annPriority,
       authorName: `${currentUser.name} (ناظر المتوسطة)`,
       authorRole: 'censor',
       badge: annBadge.trim() || 'توجيهات الناظر',
+      fileName: annUploadedFile?.name,
+      fileSize: annUploadedFile?.size,
+      fileFormat: annUploadedFile?.format,
+      fileDataUrl: annUploadedFile?.dataUrl,
     });
 
     onRefreshData();
-    setAnnSuccess('تم نشر الإعلان بنجاح إلى جميع التلاميذ!');
+    setAnnSuccess('تم نشر الإعلان مع المرفق بنجاح وحفظه في قاعدة البيانات!');
 
     setAnnTitle('');
     setAnnContent('');
+    setAnnUploadedFile(null);
+    if (annFileInputRef.current) annFileInputRef.current.value = '';
 
     setTimeout(() => {
       setAnnSuccess(null);
@@ -578,6 +663,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
                 key={ann.id}
                 announcement={ann}
                 currentUser={currentUser}
+                onPreviewAttachment={handlePreviewAnnAttachment}
                 onDelete={id => {
                   deleteAnnouncement(id);
                   onRefreshData();
@@ -594,10 +680,10 @@ export const CensorView: React.FC<CensorViewProps> = ({
           <div className="border-b border-slate-100 pb-4">
             <h2 className="text-xl font-bold text-slate-900 flex items-center gap-2">
               <Megaphone className="w-6 h-6 text-emerald-700" />
-              <span>نشر إعلان رسمي موجه لتلاميذ المتوسطة</span>
+              <span>نشر إعلان رسمي من ناظر المتوسطة</span>
             </h2>
             <p className="text-xs sm:text-sm text-slate-600 mt-1">
-              سيظهر هذا الإعلان فورياً في الصفحة الرئيسية لجميع تلاميذ المؤسسة مع تنبيه بدرجة الأهمية.
+              حدد الفئة المستهدفة وأرفق وثيقة أو منشوراً (PDF أو Word أو صورة) ليتمكن الجميع من معاينتها وتحميلها.
             </p>
           </div>
 
@@ -609,6 +695,38 @@ export const CensorView: React.FC<CensorViewProps> = ({
           )}
 
           <form onSubmit={handleCreateAnnouncement} className="space-y-4">
+            {/* Target Audience Selector */}
+            <div>
+              <label className="block text-xs font-bold text-slate-800 mb-2">
+                الفئة المستهدفة بالإعلان: <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                {[
+                  { id: 'students', label: 'التلاميذ', desc: 'يظهر في فضاء التلميذ' },
+                  { id: 'teachers', label: 'الأساتذة', desc: 'يظهر في فضاء الأساتذة' },
+                  { id: 'staff', label: 'الموظفون والعمال', desc: 'الطاقم الإداري والمهني' },
+                  { id: 'all', label: 'إعلان عام للجميع', desc: 'لكافة أفراد المؤسسة' },
+                ].map(t => {
+                  const isSelected = annTarget === t.id;
+                  return (
+                    <button
+                      key={t.id}
+                      type="button"
+                      onClick={() => setAnnTarget(t.id as AnnouncementTarget)}
+                      className={`p-3 rounded-2xl border text-right transition-all cursor-pointer ${
+                        isSelected
+                          ? 'bg-emerald-50 border-emerald-600 text-emerald-900 ring-2 ring-emerald-500/20'
+                          : 'bg-white border-slate-200 text-slate-700 hover:border-slate-300'
+                      }`}
+                    >
+                      <div className="font-bold text-xs">{t.label}</div>
+                      <div className="text-[10px] text-slate-500 mt-0.5">{t.desc}</div>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1.5">
                 عنوان الإعلان: <span className="text-red-500">*</span>
@@ -667,16 +785,83 @@ export const CensorView: React.FC<CensorViewProps> = ({
               />
             </div>
 
+            {/* Attachment Box for Announcements */}
+            <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2">
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-bold text-slate-800 flex items-center gap-1.5">
+                  <Paperclip className="w-4 h-4 text-emerald-700" />
+                  <span>إرفاق وثيقة أو منشور مع الإعلان (اختياري - PDF أو Word أو صورة):</span>
+                </label>
+                {annUploadedFile && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAnnUploadedFile(null);
+                      if (annFileInputRef.current) annFileInputRef.current.value = '';
+                    }}
+                    className="text-xs text-red-600 hover:underline flex items-center gap-1 font-bold cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                    <span>حذف المرفق</span>
+                  </button>
+                )}
+              </div>
+
+              <input
+                ref={annFileInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.xlsx,.pptx,image/*"
+                onChange={handleAnnFileChange}
+                className="hidden"
+              />
+
+              {annUploadedFile ? (
+                <div className="flex items-center justify-between p-3.5 rounded-xl bg-white border border-emerald-300 shadow-2xs">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <div className="w-9 h-9 rounded-lg bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0">
+                      <FileCheck className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="text-xs font-bold text-slate-800 truncate">{annUploadedFile.name}</p>
+                      <p className="text-[11px] text-slate-500 font-medium">{annUploadedFile.size} • جاهز للنشر والمزامنة</p>
+                    </div>
+                  </div>
+                  <span className="text-xs font-bold text-emerald-700 bg-emerald-50 px-2 py-1 rounded-lg shrink-0">
+                    تم إرفاق الملف ✓
+                  </span>
+                </div>
+              ) : (
+                <div
+                  onClick={() => annFileInputRef.current?.click()}
+                  className="border-2 border-dashed border-slate-300 hover:border-emerald-600 rounded-xl p-5 text-center cursor-pointer transition-all bg-white hover:bg-emerald-50/20"
+                >
+                  <Paperclip className="w-6 h-6 text-slate-400 mx-auto mb-1.5" />
+                  <p className="text-xs font-bold text-slate-800">
+                    انقر هنا لإرفاق رزنامة، جدول استدراك، أو وثيقة رسمية مع الإعلان
+                  </p>
+                  <p className="text-[11px] text-slate-500 mt-0.5">
+                    يدعم ملفات PDF، Word (.docx)، والصور (سيتمكن الأساتذة والتلاميذ من تحميلها أو معاينتها فورياً)
+                  </p>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
-              className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+              className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
               <Send className="w-4 h-4" />
-              <span>نشر الإعلان الآن للتلاميذ</span>
+              <span>نشر الإعلان مع المرفق فورياً</span>
             </button>
           </form>
         </div>
       )}
+
+      {/* Document Preview Modal */}
+      <DocumentPreviewModal
+        doc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+      />
 
       {/* Modal for official print slip & WhatsApp */}
       <SummonModal
