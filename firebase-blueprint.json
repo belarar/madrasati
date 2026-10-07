@@ -102,6 +102,40 @@
         "thanksCount": { "type": "number" }
       },
       "required": ["classId", "studentId", "title", "content", "createdAt"]
+    },
+    "PrivateConversation": {
+      "title": "PrivateConversation",
+      "description": "Private peer conversation between specific students in a class",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "classId": { "type": "string" },
+        "participantIds": { "type": "array", "items": { "type": "string" } },
+        "title": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "updatedAt": { "type": "string" },
+        "lastMessage": { "type": "string" },
+        "lastMessageAt": { "type": "string" },
+        "isGroup": { "type": "boolean" }
+      },
+      "required": ["classId", "participantIds", "createdAt", "updatedAt"]
+    },
+    "PrivateMessage": {
+      "title": "PrivateMessage",
+      "description": "Private message within a peer conversation",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "conversationId": { "type": "string" },
+        "senderId": { "type": "string" },
+        "senderName": { "type": "string" },
+        "content": { "type": "string" },
+        "createdAt": { "type": "string" },
+        "fileName": { "type": "string" },
+        "fileSize": { "type": "string" },
+        "fileFormat": { "type": "string" }
+      },
+      "required": ["conversationId", "senderId", "senderName", "content", "createdAt"]
     }
   },
   "firestore": {
@@ -124,6 +158,14 @@
     "/peerExchanges/{peerExchangeId}": {
       "schema": { "$ref": "#/entities/PeerExchange" },
       "description": "Collection of peer exchange posts"
+    },
+    "/private_conversations/{conversationId}": {
+      "schema": { "$ref": "#/entities/PrivateConversation" },
+      "description": "Collection of private student conversations"
+    },
+    "/private_messages/{messageId}": {
+      "schema": { "$ref": "#/entities/PrivateMessage" },
+      "description": "Collection of private messages"
     }
   }
 }

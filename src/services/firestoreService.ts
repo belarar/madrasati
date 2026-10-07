@@ -14,6 +14,8 @@ import {
   AppNotification,
   ParentSummon,
   PeerExchangePost,
+  PrivateConversation,
+  PrivateMessage,
   SchoolAnnouncement,
   SchoolDocument,
 } from '../types';
@@ -56,6 +58,8 @@ const annsCol = collection(firestore, 'announcements');
 const summonsCol = collection(firestore, 'summons');
 const peerCol = collection(firestore, 'peerExchanges');
 const notifsCol = collection(firestore, 'notifications');
+const privateConvCol = collection(firestore, 'private_conversations');
+const privateMsgCol = collection(firestore, 'private_messages');
 
 let isInitialized = false;
 
@@ -332,6 +336,80 @@ export async function savePeerPostToFirestore(post: PeerExchangePost): Promise<v
 
 export async function deletePeerPostFromFirestore(postId: string): Promise<void> {
   await deleteDoc(doc(firestore, 'peerExchanges', postId));
+}
+
+// ================= Private Student Conversations =================
+export async function savePrivateConversationToFirestore(conv: PrivateConversation): Promise<void> {
+  try {
+    const convRef = doc(firestore, 'private_conversations', conv.id);
+    await setDoc(convRef, conv, { merge: true });
+  } catch (err) {
+    console.debug('[Firestore] Error saving private conversation:', err);
+  }
+}
+
+export async function deletePrivateConversationFromFirestore(convId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(firestore, 'private_conversations', convId));
+  } catch (err) {
+    console.debug('[Firestore] Error deleting private conversation:', err);
+  }
+}
+
+export async function savePrivateMessageToFirestore(msg: PrivateMessage): Promise<void> {
+  try {
+    const msgRef = doc(firestore, 'private_messages', msg.id);
+    await setDoc(msgRef, msg, { merge: true });
+  } catch (err) {
+    console.debug('[Firestore] Error saving private message:', err);
+  }
+}
+
+export function initPrivateConversationsSync(
+  currentUserId: string,
+  onConversations: (convs: PrivateConversation[]) => void
+) {
+  if (!currentUserId) return () => {};
+
+  return onSnapshot(
+    privateConvCol,
+    snapshot => {
+      const convs: PrivateConversation[] = [];
+      snapshot.forEach(d => {
+        const data = d.data() as PrivateConversation;
+        // Strictly client-filter by participantIds to guarantee privacy
+        if (Array.isArray(data.participantIds) && data.participantIds.includes(currentUserId)) {
+          convs.push({ ...data, id: d.id });
+        }
+      });
+      convs.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+      onConversations(convs);
+    },
+    err => console.debug('[Firestore] Private convs sync error:', err)
+  );
+}
+
+export function initPrivateMessagesSync(
+  conversationId: string,
+  onMessages: (msgs: PrivateMessage[]) => void
+) {
+  if (!conversationId) return () => {};
+
+  return onSnapshot(
+    privateMsgCol,
+    snapshot => {
+      const msgs: PrivateMessage[] = [];
+      snapshot.forEach(d => {
+        const data = d.data() as PrivateMessage;
+        if (data.conversationId === conversationId) {
+          msgs.push({ ...data, id: d.id });
+        }
+      });
+      msgs.sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+      onMessages(msgs);
+    },
+    err => console.debug('[Firestore] Private msgs sync error:', err)
+  );
 }
 
 export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], existingAnns: SchoolAnnouncement[]) {

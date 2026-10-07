@@ -59,8 +59,13 @@ export const PwaInstallModal: React.FC<PwaInstallModalProps> = ({
         {/* Header */}
         <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 text-white p-5 flex items-center justify-between shrink-0 shadow-md">
           <div className="flex items-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner">
-              <Smartphone className="w-6 h-6 text-emerald-300" />
+            <div className="w-12 h-12 rounded-2xl overflow-hidden shadow-inner border border-white/25 shrink-0 bg-emerald-950 flex items-center justify-center">
+              <img
+                src="/pwa-192x192.png"
+                alt="أيقونة التطبيق"
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
             </div>
             <div>
               <h3 className="font-bold text-base sm:text-lg">تثبيت المنصة كتطبيق على الهاتف</h3>

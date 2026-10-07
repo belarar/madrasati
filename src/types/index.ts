@@ -178,7 +178,7 @@ export interface PeerExchangePost {
 // ================= نظام التنبيهات والإشعارات =================
 export interface AppNotification {
   id: string;
-  type: 'document' | 'announcement' | 'summon' | 'peer_post' | 'peer_reply';
+  type: 'document' | 'announcement' | 'summon' | 'peer_post' | 'peer_reply' | 'private_message';
   title: string;
   message: string;
   targetRole?: 'all' | 'students' | 'teachers' | 'staff' | 'director' | 'censor';
@@ -189,4 +189,33 @@ export interface AppNotification {
   createdAt: string;
   readBy: string[]; // user identifiers who opened it
 }
+
+// ================= المحادثات الخاصة والسرية بين تلاميذ القسم =================
+export interface PrivateMessage {
+  id: string;
+  conversationId: string;
+  senderId: string; // رقم تعريف التلميذ المرسل
+  senderName: string; // اسم ولقب التلميذ المرسل
+  content: string;
+  createdAt: string;
+  fileName?: string;
+  fileSize?: string;
+  fileDataUrl?: string;
+  fileFormat?: FileFormat;
+}
+
+export interface PrivateConversation {
+  id: string;
+  classId: string; // رمز القسم (مثل 4AM-1)
+  participantIds: string[]; // أرقام تعريف التلاميذ المشاركين فقط
+  participantNames: Record<string, string>; // identifier -> اسم التلميذ
+  title?: string; // عنوان مخصص في حالة المجموعة
+  createdAt: string;
+  updatedAt: string;
+  lastMessage?: string;
+  lastMessageAt?: string;
+  lastSenderName?: string;
+  isGroup?: boolean;
+}
+
 

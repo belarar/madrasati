@@ -168,7 +168,18 @@ export default function App() {
           <div className="max-w-4xl mx-auto py-8 sm:py-12 space-y-10">
             {/* Welcome Institutional Hero */}
             <div className="text-center space-y-4">
-              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold">
+              <div className="flex justify-center mb-1">
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl overflow-hidden shadow-xl border-2 border-emerald-500/40 bg-emerald-950 p-1 group hover:scale-105 transition-transform duration-300">
+                  <img
+                    src="/pwa-192x192.png"
+                    alt={SCHOOL_NAME}
+                    className="w-full h-full object-cover rounded-2xl shadow-inner"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              </div>
+
+              <div className="inline-flex items-center gap-2 px-3.5 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold shadow-2xs">
                 <Sparkles className="w-3.5 h-3.5 text-emerald-700" />
                 <span>المنصة الرقمية الرسمية لمؤسسة التربية والتعليم</span>
               </div>

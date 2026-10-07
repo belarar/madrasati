@@ -194,8 +194,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
         <div className="flex items-center justify-between h-16 sm:h-20 gap-3">
           {/* Logo & School Name */}
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 sm:w-12 sm:h-12 rounded-2xl bg-gradient-to-tr from-emerald-800 to-teal-700 text-white flex items-center justify-center shadow-xs border border-emerald-900/20 shrink-0">
-              <GraduationCap className="w-6 h-6 text-emerald-200" />
+            <div className="w-11 h-11 sm:w-13 sm:h-13 rounded-2xl overflow-hidden shadow-xs border border-emerald-800/30 shrink-0 bg-emerald-900 flex items-center justify-center">
+              <img
+                src="/pwa-192x192.png"
+                alt={SCHOOL_NAME}
+                className="w-full h-full object-cover"
+                referrerPolicy="no-referrer"
+              />
             </div>
 
             <div className="text-right">

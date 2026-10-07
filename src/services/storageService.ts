@@ -13,6 +13,8 @@ import {
   ParentSummon,
   PeerExchangePost,
   PeerExchangeReply,
+  PrivateConversation,
+  PrivateMessage,
   SchoolAnnouncement,
   SchoolDocument,
   SubjectId,
@@ -25,13 +27,18 @@ import {
   deleteAnnouncementFromFirestore,
   deleteDocumentFromFirestore,
   deletePeerPostFromFirestore,
+  deletePrivateConversationFromFirestore,
   deleteSummonFromFirestore,
   fetchFilePayloadFromFirestore,
   incrementDownloadCountInFirestore,
   initFirestoreRealtimeSync,
+  initPrivateConversationsSync,
+  initPrivateMessagesSync,
   saveAnnouncementToFirestore,
   saveDocumentToFirestore,
   savePeerPostToFirestore,
+  savePrivateConversationToFirestore,
+  savePrivateMessageToFirestore,
   saveSummonToFirestore,
   seedInitialFirestoreData,
 } from './firestoreService';
@@ -45,6 +52,8 @@ export const STORAGE_KEYS = {
   USERS: 'ben_naama_users',
   PEER_EXCHANGES: 'ben_naama_peer_exchanges',
   NOTIFICATIONS: 'ben_naama_notifications',
+  PRIVATE_CONVERSATIONS: 'ben_naama_private_conversations',
+  PRIVATE_MESSAGES: 'ben_naama_private_messages',
 };
 
 const CLEAN_VERSION_KEY = 'ben_naama_strict_official_v16';
@@ -1601,6 +1610,24 @@ export async function syncWithServer(): Promise<void> {
       safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(serverNotifs));
       window.dispatchEvent(new Event('notifications-change'));
     }
+
+    // 7. Student Private Conversations Sync
+    if (user && user.role === 'student') {
+      try {
+        const convRes = await fetch(`/api/conversations?studentId=${encodeURIComponent(user.identifier)}`);
+        if (convRes.ok) {
+          const serverConvs: PrivateConversation[] = await convRes.json();
+          if (Array.isArray(serverConvs)) {
+            const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+            const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+            const localOtherUserConvs = localConvs.filter(c => !c.participantIds.includes(user.identifier));
+            const merged = [...localOtherUserConvs, ...serverConvs];
+            safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(merged));
+            window.dispatchEvent(new Event('private-conversations-change'));
+          }
+        }
+      } catch {}
+    }
   } catch (err) {
     console.debug('[Sync] Sync network or transient offline:', err);
   } finally {
@@ -1660,6 +1687,189 @@ export async function markAllNotificationsAsRead(userId: string): Promise<void> 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ userId }),
   }).catch(() => {});
+}
+
+// ================= المحادثات الخاصة والسرية بين تلاميذ القسم =================
+
+// جلب قائمة زملاء نفس القسم الدراسي حصرياً للتواصل الخاص
+export function getClassmatesForStudent(classId: string, currentStudentId: string): UserProfile[] {
+  if (!classId) return [];
+  const allUsers = getAllUsers();
+  const userMap = new Map<string, UserProfile>();
+
+  // 1. All registered / edited students in state
+  for (const u of allUsers) {
+    if (u.role === 'student' && u.classId === classId && u.identifier !== currentStudentId) {
+      userMap.set(u.identifier, u);
+    }
+  }
+
+  // 2. Official students from ministry list for this class
+  for (const s of OFFICIAL_STUDENTS_LIST) {
+    if (s.classId === classId && s.identifier !== currentStudentId && !userMap.has(s.identifier)) {
+      userMap.set(s.identifier, toUserProfile(s));
+    }
+  }
+
+  return Array.from(userMap.values()).sort((a, b) => a.name.localeCompare(b.name, 'ar'));
+}
+
+// جلب المحادثات الخاصة بالمستخدم الحالي فقط (خصوصية تامة ومضمونة)
+export function getPrivateConversations(studentId: string): PrivateConversation[] {
+  if (!studentId) return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+    const list: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+    return list
+      .filter(c => Array.isArray(c.participantIds) && c.participantIds.includes(studentId))
+      .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+  } catch {
+    return [];
+  }
+}
+
+// إنشاء أو فتح محادثة سرية (فردية مع زميل محدد أو جماعية مع عدة زملاء)
+export function createOrGetPrivateConversation(
+  creator: UserProfile,
+  selectedClassmates: UserProfile[],
+  customTitle?: string
+): PrivateConversation {
+  const currentConvs = getPrivateConversations(creator.identifier);
+  const participantIds = Array.from(new Set([creator.identifier, ...selectedClassmates.map(c => c.identifier)]));
+  
+  // إذا كانت محادثة ثنائية (1 لـ 1)، نتحقق أولاً إن كانت محادثة سابقة موجودة بينهما لمنع التكرار
+  if (selectedClassmates.length === 1) {
+    const otherId = selectedClassmates[0].identifier;
+    const existing = currentConvs.find(
+      c => !c.isGroup && c.participantIds.length === 2 && c.participantIds.includes(otherId)
+    );
+    if (existing) {
+      return existing;
+    }
+  }
+
+  const participantNames: Record<string, string> = {
+    [creator.identifier]: creator.name,
+  };
+  selectedClassmates.forEach(c => {
+    participantNames[c.identifier] = c.name;
+  });
+
+  const isGroup = selectedClassmates.length > 1;
+  const autoTitle = isGroup
+    ? (customTitle?.trim() || `مجموعة زملاء (${selectedClassmates.length + 1} مشاركين)`)
+    : selectedClassmates[0].name;
+
+  const newConv: PrivateConversation = {
+    id: 'conv-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+    classId: creator.classId || '2AM-2',
+    participantIds,
+    participantNames,
+    title: autoTitle,
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
+    isGroup,
+  };
+
+  const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+  const allConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+  const updatedAll = [newConv, ...allConvs.filter(c => c.id !== newConv.id)];
+  safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(updatedAll));
+  window.dispatchEvent(new Event('private-conversations-change'));
+
+  // Sync to Firestore Cloud
+  savePrivateConversationToFirestore(newConv).catch(() => {});
+
+  // Sync to Server
+  fetch('/api/conversations', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newConv),
+  }).catch(() => {});
+
+  return newConv;
+}
+
+// حذف محادثة خاصة
+export function deletePrivateConversation(convId: string): void {
+  const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+  const allConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+  const updated = allConvs.filter(c => c.id !== convId);
+  safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(updated));
+
+  // حذف الرسائل التابعة لها
+  const rawMsgs = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+  const allMsgs: PrivateMessage[] = rawMsgs ? JSON.parse(rawMsgs) : [];
+  const updatedMsgs = allMsgs.filter(m => m.conversationId !== convId);
+  safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify(updatedMsgs));
+
+  window.dispatchEvent(new Event('private-conversations-change'));
+  window.dispatchEvent(new Event('private-messages-change'));
+
+  // Cloud & server delete
+  deletePrivateConversationFromFirestore(convId).catch(() => {});
+  fetch('/api/conversations/' + encodeURIComponent(convId), { method: 'DELETE' }).catch(() => {});
+}
+
+// جلب رسائل محادثة معينة
+export function getLocalPrivateMessages(conversationId: string): PrivateMessage[] {
+  if (!conversationId) return [];
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+    const list: PrivateMessage[] = raw ? JSON.parse(raw) : [];
+    return list
+      .filter(m => m.conversationId === conversationId)
+      .sort((a, b) => new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime());
+  } catch {
+    return [];
+  }
+}
+
+// إرسال رسالة خاصة جديدة
+export async function sendPrivateMessage(
+  msg: Omit<PrivateMessage, 'id' | 'createdAt'>
+): Promise<PrivateMessage> {
+  const newMsg: PrivateMessage = {
+    ...msg,
+    id: 'pmsg-' + Date.now() + '-' + Math.random().toString(36).slice(2, 7),
+    createdAt: new Date().toISOString(),
+  };
+
+  // 1. Save message locally
+  const rawMsgs = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+  const allMsgs: PrivateMessage[] = rawMsgs ? JSON.parse(rawMsgs) : [];
+  const updatedMsgs = [...allMsgs.filter(m => m.id !== newMsg.id), newMsg];
+  safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify(updatedMsgs));
+
+  // 2. Update conversation snippet & timestamp
+  const rawConvs = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+  const allConvs: PrivateConversation[] = rawConvs ? JSON.parse(rawConvs) : [];
+  const convIndex = allConvs.findIndex(c => c.id === newMsg.conversationId);
+  if (convIndex >= 0) {
+    allConvs[convIndex] = {
+      ...allConvs[convIndex],
+      lastMessage: newMsg.content || (newMsg.fileName ? `📎 مرفق: ${newMsg.fileName}` : 'رسالة'),
+      lastMessageAt: newMsg.createdAt,
+      lastSenderName: newMsg.senderName,
+      updatedAt: newMsg.createdAt,
+    };
+    safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(allConvs));
+  }
+
+  window.dispatchEvent(new Event('private-messages-change'));
+  window.dispatchEvent(new Event('private-conversations-change'));
+
+  // 3. Save to Firestore Cloud Real-time
+  savePrivateMessageToFirestore(newMsg).catch(() => {});
+
+  // 4. Save to Server
+  fetch(`/api/conversations/${encodeURIComponent(newMsg.conversationId)}/messages`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newMsg),
+  }).catch(() => {});
+
+  return newMsg;
 }
 
 

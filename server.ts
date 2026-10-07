@@ -40,6 +40,8 @@ export interface SchoolDatabase {
   announcements: any[];
   summons: any[];
   peerExchanges: any[];
+  privateConversations: any[];
+  privateMessages: any[];
   notifications: AppNotification[];
   userCustomPins: Record<string, string>; // identifier -> custom password
 }
@@ -53,6 +55,8 @@ function loadDatabase(): SchoolDatabase {
       const raw = fs.readFileSync(DB_FILE, 'utf-8');
       const parsed = JSON.parse(raw);
       if (parsed && Array.isArray(parsed.documents)) {
+        if (!Array.isArray(parsed.privateConversations)) parsed.privateConversations = [];
+        if (!Array.isArray(parsed.privateMessages)) parsed.privateMessages = [];
         // Sanitize and normalize documents
         parsed.documents = parsed.documents.map((d: any) => {
           const targetClasses = Array.isArray(d.targetClasses) && d.targetClasses.length > 0 ? d.targetClasses : ['ALL'];
@@ -110,6 +114,8 @@ function loadDatabase(): SchoolDatabase {
     ],
     summons: [],
     peerExchanges: [],
+    privateConversations: [],
+    privateMessages: [],
     notifications: [
       {
         id: 'notif-welcome',
@@ -164,6 +170,8 @@ app.get('/api/sync', (req, res) => {
     announcements: db.announcements,
     summons: db.summons,
     peerExchanges: db.peerExchanges,
+    privateConversations: db.privateConversations,
+    privateMessages: db.privateMessages,
     notifications: db.notifications,
     userCustomPins: db.userCustomPins,
     serverTime: new Date().toISOString(),
@@ -176,6 +184,8 @@ app.post('/api/sync', (req, res) => {
     clientAnns = [],
     clientSummons = [],
     clientPeer = [],
+    clientConvs = [],
+    clientMessages = [],
     clientPins = {},
   } = req.body || {};
 
@@ -221,6 +231,26 @@ app.post('/api/sync', (req, res) => {
     }
   }
 
+  // Merge private conversations
+  if (Array.isArray(clientConvs)) {
+    for (const cConv of clientConvs) {
+      if (cConv && cConv.id && !db.privateConversations.some(c => c.id === cConv.id)) {
+        db.privateConversations.unshift(cConv);
+        changed = true;
+      }
+    }
+  }
+
+  // Merge private messages
+  if (Array.isArray(clientMessages)) {
+    for (const cMsg of clientMessages) {
+      if (cMsg && cMsg.id && !db.privateMessages.some(m => m.id === cMsg.id)) {
+        db.privateMessages.push(cMsg);
+        changed = true;
+      }
+    }
+  }
+
   // Merge custom employee passwords
   if (clientPins && typeof clientPins === 'object') {
     for (const [id, pin] of Object.entries(clientPins)) {
@@ -243,6 +273,8 @@ app.post('/api/sync', (req, res) => {
     announcements: db.announcements,
     summons: db.summons,
     peerExchanges: db.peerExchanges,
+    privateConversations: db.privateConversations,
+    privateMessages: db.privateMessages,
     notifications: db.notifications,
     userCustomPins: db.userCustomPins,
     serverTime: new Date().toISOString(),
@@ -610,6 +642,101 @@ app.post('/api/peer-exchanges/:id/reply', (req, res) => {
 app.delete('/api/peer-exchanges/:id', (req, res) => {
   const { id } = req.params;
   db.peerExchanges = db.peerExchanges.filter(p => p.id !== id);
+  saveDatabase(db);
+  res.json({ success: true });
+});
+
+// 7. Private Student Conversations API (المحادثات الخاصة والسرية بين تلاميذ القسم)
+app.get('/api/conversations', (req, res) => {
+  const { studentId } = req.query;
+  if (!studentId || typeof studentId !== 'string') {
+    return res.json([]);
+  }
+  const convs = (db.privateConversations || []).filter(c =>
+    Array.isArray(c.participantIds) && c.participantIds.includes(studentId)
+  );
+  res.json(convs);
+});
+
+app.post('/api/conversations', (req, res) => {
+  const conv = req.body;
+  if (!conv || !Array.isArray(conv.participantIds)) {
+    return res.status(400).json({ error: 'بيانات المحادثة غير صالحة' });
+  }
+
+  const existingIndex = (db.privateConversations || []).findIndex(c => c.id === conv.id);
+  if (existingIndex !== -1) {
+    db.privateConversations[existingIndex] = { ...db.privateConversations[existingIndex], ...conv };
+  } else {
+    db.privateConversations = [conv, ...(db.privateConversations || [])];
+  }
+
+  saveDatabase(db);
+  res.status(201).json(conv);
+});
+
+app.get('/api/conversations/:id/messages', (req, res) => {
+  const { id } = req.params;
+  const { studentId } = req.query;
+  const conv = (db.privateConversations || []).find(c => c.id === id);
+
+  // Privacy verification: Only authorized participants can fetch messages
+  if (conv && studentId && typeof studentId === 'string') {
+    if (!conv.participantIds.includes(studentId)) {
+      return res.status(403).json({ error: 'عذراً، هذه محادثة خاصة وسرية لا يمكن الاطلاع عليها إلا للمشاركين' });
+    }
+  }
+
+  const messages = (db.privateMessages || []).filter(m => m.conversationId === id);
+  res.json(messages);
+});
+
+app.post('/api/conversations/:id/messages', (req, res) => {
+  const { id } = req.params;
+  const msg = req.body;
+  const newMsg = {
+    ...msg,
+    id: msg.id || 'pmsg-' + Date.now(),
+    conversationId: id,
+    createdAt: msg.createdAt || new Date().toISOString(),
+  };
+
+  db.privateMessages = [...(db.privateMessages || []), newMsg];
+
+  // Update conversation state
+  const conv = (db.privateConversations || []).find(c => c.id === id);
+  if (conv) {
+    conv.lastMessage = newMsg.content;
+    conv.lastMessageAt = newMsg.createdAt;
+    conv.lastSenderName = newMsg.senderName;
+    conv.updatedAt = newMsg.createdAt;
+
+    // Send private alert notification to the other participant(s) ONLY
+    const otherParticipants = (conv.participantIds || []).filter((pid: string) => pid !== newMsg.senderId);
+    for (const recipientId of otherParticipants) {
+      const notif: AppNotification = {
+        id: 'notif-pmsg-' + Date.now() + '-' + recipientId,
+        type: 'private_message',
+        title: `رسالة خاصة جديدة من: ${newMsg.senderName}`,
+        message: newMsg.content.slice(0, 100),
+        targetUserId: recipientId,
+        sourceAuthorName: newMsg.senderName,
+        sourceId: conv.id,
+        createdAt: new Date().toISOString(),
+        readBy: [],
+      };
+      db.notifications = [notif, ...db.notifications];
+    }
+  }
+
+  saveDatabase(db);
+  res.status(201).json(newMsg);
+});
+
+app.delete('/api/conversations/:id', (req, res) => {
+  const { id } = req.params;
+  db.privateConversations = (db.privateConversations || []).filter(c => c.id !== id);
+  db.privateMessages = (db.privateMessages || []).filter(m => m.conversationId !== id);
   saveDatabase(db);
   res.json({ success: true });
 });
