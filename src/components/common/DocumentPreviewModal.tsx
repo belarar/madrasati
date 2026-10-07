@@ -1,20 +1,24 @@
-import React from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Calendar,
   Clock,
   Download,
+  ExternalLink,
+  Eye,
   FileCheck,
   FileSpreadsheet,
   FileText,
   GraduationCap,
+  ImageIcon,
   Layers,
+  Loader2,
   Presentation,
   Share2,
   User,
   X,
 } from 'lucide-react';
 import { SCHOOL_NAME, SUBJECTS } from '../../data/mockData';
-import { downloadFile } from '../../services/storageService';
+import { downloadFile, ensureDocumentFileDataUrl } from '../../services/storageService';
 import { SchoolDocument } from '../../types';
 
 interface DocumentPreviewModalProps {
@@ -23,9 +27,49 @@ interface DocumentPreviewModalProps {
 }
 
 export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ doc, onClose }) => {
+  const [dataUrl, setDataUrl] = useState<string | null>(doc?.fileDataUrl || null);
+  const [isLoadingFile, setIsLoadingFile] = useState(false);
+
+  useEffect(() => {
+    if (!doc) return;
+    if (doc.fileDataUrl && doc.fileDataUrl.startsWith('data:')) {
+      setDataUrl(doc.fileDataUrl);
+      return;
+    }
+
+    let isMounted = true;
+    setIsLoadingFile(true);
+    ensureDocumentFileDataUrl(doc)
+      .then(url => {
+        if (isMounted) {
+          setDataUrl(url);
+          setIsLoadingFile(false);
+        }
+      })
+      .catch(() => {
+        if (isMounted) setIsLoadingFile(false);
+      });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [doc]);
+
   if (!doc) return null;
 
   const subjectInfo = SUBJECTS.find(s => s.id === doc.subject);
+  const isImage =
+    doc.fileFormat === 'image' ||
+    (dataUrl && dataUrl.startsWith('data:image/')) ||
+    /\.(jpg|jpeg|png|webp|bmp|gif)$/i.test(doc.fileName || '');
+  const isPdf =
+    doc.fileFormat === 'pdf' ||
+    (dataUrl && dataUrl.startsWith('data:application/pdf')) ||
+    /\.pdf$/i.test(doc.fileName || '');
+  const isWord =
+    doc.fileFormat === 'docx' ||
+    doc.fileFormat === 'doc' ||
+    /\.(docx?)$/i.test(doc.fileName || '');
 
   const getFormatIcon = (format: string) => {
     switch (format.toLowerCase()) {
@@ -40,6 +84,8 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ doc,
       case 'pptx':
       case 'ppt':
         return <Presentation className="w-8 h-8 text-amber-600" />;
+      case 'image':
+        return <ImageIcon className="w-8 h-8 text-purple-600" />;
       default:
         return <FileText className="w-8 h-8 text-slate-600" />;
     }
@@ -158,6 +204,70 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ doc,
             );
           })()}
 
+          {/* Interactive Visual File Preview Area */}
+          <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-xs font-bold text-slate-700 flex items-center gap-1.5">
+                <Eye className="w-4 h-4 text-emerald-700" />
+                <span>معاينة محتوى المرفق ({doc.fileFormat.toUpperCase()}):</span>
+              </span>
+              <span className="text-[11px] font-mono text-slate-500 bg-white px-2 py-0.5 rounded-md border border-slate-200">
+                {doc.fileName || `${doc.title}.${doc.fileFormat}`}
+              </span>
+            </div>
+
+            {isLoadingFile ? (
+              <div className="py-12 flex flex-col items-center justify-center text-slate-500 gap-2">
+                <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+                <span className="text-xs font-semibold">جارٍ تحميل وتجهيز ملف الوثيقة بدقة كاملة...</span>
+              </div>
+            ) : isImage && dataUrl ? (
+              <div className="flex justify-center bg-slate-900/5 rounded-xl p-2 border border-slate-200 overflow-hidden">
+                <img
+                  src={dataUrl}
+                  alt={doc.title}
+                  className="max-h-[50vh] object-contain rounded-lg shadow-xs"
+                />
+              </div>
+            ) : isPdf && dataUrl ? (
+              <div className="rounded-xl overflow-hidden border border-slate-300 bg-white shadow-inner">
+                <iframe
+                  src={dataUrl}
+                  title={doc.title}
+                  className="w-full h-[52vh] rounded-xl"
+                />
+              </div>
+            ) : isWord ? (
+              <div className="bg-gradient-to-br from-blue-50 to-indigo-50 border border-blue-200 rounded-2xl p-5 text-right flex flex-col sm:flex-row items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-14 h-14 rounded-2xl bg-blue-600 text-white flex items-center justify-center shadow-md shrink-0">
+                    <FileCheck className="w-8 h-8" />
+                  </div>
+                  <div>
+                    <h4 className="font-bold text-slate-900 text-sm sm:text-base">
+                      {doc.fileName || `${doc.title}.docx`}
+                    </h4>
+                    <p className="text-xs text-blue-900/80 mt-0.5">
+                      مستند مايكروسوفت وورد أصلي جاهز للفتح والتعديل أو الطباعة الفورية ({doc.fileSize})
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => downloadFile({ ...doc, fileDataUrl: dataUrl || doc.fileDataUrl })}
+                  className="px-5 py-2.5 rounded-xl bg-blue-700 hover:bg-blue-800 text-white font-bold text-xs sm:text-sm shadow-sm transition-transform active:scale-95 flex items-center gap-2 shrink-0 cursor-pointer"
+                >
+                  <Download className="w-4 h-4" />
+                  <span>تحميل ملف Word الأصلي</span>
+                </button>
+              </div>
+            ) : (
+              <div className="bg-white border border-slate-200 rounded-xl p-4 text-center text-xs text-slate-600">
+                الملف جاهز للتحميل والفتح المباشر على جهازك بصيغة {doc.fileFormat.toUpperCase()} ({doc.fileSize}).
+              </div>
+            )}
+          </div>
+
           {/* Institutional note */}
           <div className="p-4 rounded-2xl bg-amber-50 border border-amber-200 text-xs text-amber-900 flex items-start gap-3">
             <GraduationCap className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
@@ -190,7 +300,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ doc,
 
             <button
               onClick={() => {
-                downloadFile(doc);
+                downloadFile({ ...doc, fileDataUrl: dataUrl || doc.fileDataUrl });
               }}
               className="flex items-center gap-2 px-6 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs sm:text-sm shadow-sm transition-transform active:scale-95"
             >

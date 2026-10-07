@@ -320,6 +320,24 @@ app.post('/api/documents', (req, res) => {
   res.status(201).json(newDoc);
 });
 
+function getMimeTypeByFormat(format?: string, filename?: string): string {
+  const ext = (filename ? filename.split('.').pop() || '' : format || '').toLowerCase();
+  switch (ext) {
+    case 'pdf': return 'application/pdf';
+    case 'docx': return 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
+    case 'doc': return 'application/msword';
+    case 'xlsx': return 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
+    case 'xls': return 'application/vnd.ms-excel';
+    case 'pptx': return 'application/vnd.openxmlformats-officedocument.presentationml.presentation';
+    case 'ppt': return 'application/vnd.ms-powerpoint';
+    case 'jpg':
+    case 'jpeg': return 'image/jpeg';
+    case 'png': return 'image/png';
+    case 'webp': return 'image/webp';
+    default: return 'application/octet-stream';
+  }
+}
+
 app.get('/api/documents/:id/download', (req, res) => {
   const { id } = req.params;
   const doc = db.documents.find(d => d.id === id);
@@ -336,18 +354,18 @@ app.get('/api/documents/:id/download', (req, res) => {
       const header = doc.fileDataUrl.slice(0, commaIndex);
       const base64Data = doc.fileDataUrl.slice(commaIndex + 1);
       const mimeMatch = header.match(/^data:([^;]+)/);
-      const mime = mimeMatch ? mimeMatch[1] : 'application/octet-stream';
-      const buffer = Buffer.from(base64Data, 'base64');
       const filename = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
+      const mime = mimeMatch ? mimeMatch[1] : getMimeTypeByFormat(doc.fileFormat, filename);
+      const buffer = Buffer.from(base64Data, 'base64');
       res.setHeader('Content-Type', mime);
-      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
       return res.send(buffer);
     }
   }
 
   const filename = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
-  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"`);
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
   res.send(`متوسطة الشهيد بن نعمة مصطفى (غليزان)
 عنوان الوثيقة: ${doc.title}
 المادة: ${doc.subject}
@@ -357,6 +375,45 @@ app.get('/api/documents/:id/download', (req, res) => {
 
 توجيهات بيداغوجية:
 ${doc.description || 'يرجى من جميع التلاميذ المعنيين الاطلاع على الوثيقة وإنجاز المطلوب.'}
+`);
+});
+
+// Download Announcement Attachment
+app.get('/api/announcements/:id/download', (req, res) => {
+  const { id } = req.params;
+  const ann = db.announcements.find(a => a.id === id);
+  if (!ann) {
+    return res.status(404).send('الإعلان غير موجود');
+  }
+
+  if (ann.fileDataUrl && typeof ann.fileDataUrl === 'string' && ann.fileDataUrl.startsWith('data:')) {
+    const commaIndex = ann.fileDataUrl.indexOf(',');
+    if (commaIndex !== -1) {
+      const header = ann.fileDataUrl.slice(0, commaIndex);
+      const base64Data = ann.fileDataUrl.slice(commaIndex + 1);
+      const mimeMatch = header.match(/^data:([^;]+)/);
+      const filename = ann.fileName || `${ann.title}.${ann.fileFormat || 'pdf'}`;
+      const mime = mimeMatch ? mimeMatch[1] : getMimeTypeByFormat(ann.fileFormat, filename);
+      const buffer = Buffer.from(base64Data, 'base64');
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      return res.send(buffer);
+    }
+  }
+
+  const filename = ann.fileName || `${ann.title.replace(/\s+/g, '_')}.txt`;
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+  res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+  res.send(`الجمهورية الجزائرية الديمقراطية الشعبية
+وزارة التربية الوطنية
+متوسطة الشهيد بن نعمة مصطفى - وادي ارهيو (ولاية غليزان)
+----------------------------------------------------------------------
+وثيقة رسمية ومرفق إداري: ${ann.title}
+تاريخ الصدور: ${new Date(ann.createdAt).toLocaleDateString('ar-DZ')}
+جهة الإصدار: ${ann.authorName}
+----------------------------------------------------------------------
+نص الإعلان والتعليمات:
+${ann.content}
 `);
 });
 

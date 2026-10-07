@@ -26,6 +26,7 @@ import {
   deleteDocumentFromFirestore,
   deletePeerPostFromFirestore,
   deleteSummonFromFirestore,
+  fetchFilePayloadFromFirestore,
   incrementDownloadCountInFirestore,
   initFirestoreRealtimeSync,
   saveAnnouncementToFirestore,
@@ -34,6 +35,7 @@ import {
   saveSummonToFirestore,
   seedInitialFirestoreData,
 } from './firestoreService';
+import { getFileFromIndexedDb, saveFileToIndexedDb } from '../utils/fileStorageDb';
 
 export const STORAGE_KEYS = {
   CURRENT_USER: 'ben_naama_current_user',
@@ -117,6 +119,20 @@ export function initStorage(): void {
           cachedDocuments = merged;
           safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(merged));
           window.dispatchEvent(new Event('documents-change'));
+
+          // Asynchronously hydrate any missing file payloads from IndexedDB or Firestore chunks
+          liveDocs.forEach(d => {
+            if (!d.fileDataUrl) {
+              getFileFromIndexedDb(d.id).then(stored => {
+                if (stored?.dataUrl && cachedDocuments) {
+                  cachedDocuments = cachedDocuments.map(item =>
+                    item.id === d.id ? { ...item, fileDataUrl: stored.dataUrl } : item
+                  );
+                  window.dispatchEvent(new Event('documents-change'));
+                }
+              }).catch(() => {});
+            }
+          });
         }
       },
       onAnnouncements: (liveAnns) => {
@@ -132,6 +148,20 @@ export function initStorage(): void {
           cachedAnnouncements = merged;
           safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(merged));
           window.dispatchEvent(new Event('announcements-change'));
+
+          // Asynchronously hydrate missing attachments
+          liveAnns.forEach(a => {
+            if (!a.fileDataUrl && a.fileName) {
+              getFileFromIndexedDb(a.id).then(stored => {
+                if (stored?.dataUrl && cachedAnnouncements) {
+                  cachedAnnouncements = cachedAnnouncements.map(item =>
+                    item.id === a.id ? { ...item, fileDataUrl: stored.dataUrl } : item
+                  );
+                  window.dispatchEvent(new Event('announcements-change'));
+                }
+              }).catch(() => {});
+            }
+          });
         }
       },
       onSummons: (liveSummons) => {
@@ -561,6 +591,17 @@ export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'do
   safeSetItem(STORAGE_KEYS.DOCUMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('documents-change'));
 
+  // Save full binary payload to persistent IndexedDB
+  if (newDoc.fileDataUrl) {
+    saveFileToIndexedDb(
+      newDoc.id,
+      newDoc.fileDataUrl,
+      newDoc.fileName || '',
+      newDoc.fileFormat || 'pdf',
+      newDoc.fileSize || ''
+    ).catch(() => {});
+  }
+
   // 1. Direct Cloud Database Save (Firebase Firestore)
   saveDocumentToFirestore(newDoc).catch(err => {
     console.warn('[Firestore] Cloud save document error:', err);
@@ -616,77 +657,180 @@ export function incrementDownloadCount(docId: string): void {
   }
 }
 
-// Real downloadable file generator & streaming server downloader
-export function downloadFile(doc: SchoolDocument): void {
-  incrementDownloadCount(doc.id);
-
-  // 1. If doc has explicit data URL in memory
-  if (doc.fileDataUrl && doc.fileDataUrl.startsWith('data:')) {
-    const a = document.createElement('a');
-    a.href = doc.fileDataUrl;
-    a.download = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    return;
-  }
-
-  // 2. Direct server-side streaming download
-  const serverDownloadUrl = `/api/documents/${encodeURIComponent(doc.id)}/download`;
+export function triggerBrowserDownload(urlOrData: string, filename: string): void {
+  if (typeof document === 'undefined') return;
   const a = document.createElement('a');
-  a.href = serverDownloadUrl;
-  a.download = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
+  a.href = urlOrData;
+  a.download = filename;
   document.body.appendChild(a);
   a.click();
   document.body.removeChild(a);
 }
 
-// Download announcement attachment
-export function downloadAnnouncementAttachment(ann: SchoolAnnouncement): void {
+// Load full binary file on demand (IndexedDB -> Cloud Firestore chunks -> Server)
+export async function ensureDocumentFileDataUrl(doc: SchoolDocument): Promise<string | null> {
+  if (doc.fileDataUrl && doc.fileDataUrl.startsWith('data:')) {
+    return doc.fileDataUrl;
+  }
+
+  // 1. Check IndexedDB
+  try {
+    const fromIdb = await getFileFromIndexedDb(doc.id);
+    if (fromIdb?.dataUrl) {
+      doc.fileDataUrl = fromIdb.dataUrl;
+      return fromIdb.dataUrl;
+    }
+  } catch {}
+
+  // 2. Check Cloud Firestore chunks
+  try {
+    const fromCloud = await fetchFilePayloadFromFirestore(doc.id);
+    if (fromCloud) {
+      doc.fileDataUrl = fromCloud;
+      saveFileToIndexedDb(doc.id, fromCloud, doc.fileName || '', doc.fileFormat || 'pdf', doc.fileSize || '');
+      return fromCloud;
+    }
+  } catch {}
+
+  // 3. Fallback to Server API blob
+  try {
+    const res = await fetch(`/api/documents/${encodeURIComponent(doc.id)}/download`);
+    if (res.ok) {
+      const blob = await res.blob();
+      const reader = new FileReader();
+      return new Promise(resolve => {
+        reader.onload = () => {
+          const resUrl = reader.result as string;
+          doc.fileDataUrl = resUrl;
+          saveFileToIndexedDb(doc.id, resUrl, doc.fileName || '', doc.fileFormat || 'pdf', doc.fileSize || '');
+          resolve(resUrl);
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    }
+  } catch {}
+
+  return null;
+}
+
+export async function ensureAnnouncementFileDataUrl(ann: SchoolAnnouncement): Promise<string | null> {
   if (ann.fileDataUrl && ann.fileDataUrl.startsWith('data:')) {
-    const a = document.createElement('a');
-    a.href = ann.fileDataUrl;
-    a.download = ann.fileName || `${ann.title}.${ann.fileFormat || 'pdf'}`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
+    return ann.fileDataUrl;
+  }
+
+  // 1. Check IndexedDB
+  try {
+    const fromIdb = await getFileFromIndexedDb(ann.id);
+    if (fromIdb?.dataUrl) {
+      ann.fileDataUrl = fromIdb.dataUrl;
+      return fromIdb.dataUrl;
+    }
+  } catch {}
+
+  // 2. Check Cloud Firestore chunks
+  try {
+    const fromCloud = await fetchFilePayloadFromFirestore(ann.id);
+    if (fromCloud) {
+      ann.fileDataUrl = fromCloud;
+      saveFileToIndexedDb(ann.id, fromCloud, ann.fileName || '', ann.fileFormat || 'pdf', ann.fileSize || '');
+      return fromCloud;
+    }
+  } catch {}
+
+  // 3. Server download
+  try {
+    const res = await fetch(`/api/announcements/${encodeURIComponent(ann.id)}/download`);
+    if (res.ok) {
+      const blob = await res.blob();
+      const reader = new FileReader();
+      return new Promise(resolve => {
+        reader.onload = () => {
+          const resUrl = reader.result as string;
+          ann.fileDataUrl = resUrl;
+          saveFileToIndexedDb(ann.id, resUrl, ann.fileName || '', ann.fileFormat || 'pdf', ann.fileSize || '');
+          resolve(resUrl);
+        };
+        reader.onerror = () => resolve(null);
+        reader.readAsDataURL(blob);
+      });
+    }
+  } catch {}
+
+  return null;
+}
+
+// Real downloadable file generator & streaming server downloader
+export async function downloadFile(doc: SchoolDocument): Promise<void> {
+  incrementDownloadCount(doc.id);
+  const targetFilename = doc.fileName || `${doc.title}.${doc.fileFormat || 'pdf'}`;
+
+  // 1. If doc has explicit data URL in memory
+  if (doc.fileDataUrl && doc.fileDataUrl.startsWith('data:')) {
+    triggerBrowserDownload(doc.fileDataUrl, targetFilename);
     return;
   }
 
-  // Fallback: create official formatted document file
-  const docContent = `الجمهورية الجزائرية الديمقراطية الشعبية
-وزارة التربية الوطنية
-متوسطة الشهيد بن نعمة مصطفى - وادي ارهيو (ولاية غليزان)
-----------------------------------------------------------------------
-وثيقة رسمية ومرفق إداري: ${ann.title}
-تاريخ الصدور: ${new Date(ann.createdAt).toLocaleDateString('ar-DZ')}
-جهة الإصدار: ${ann.authorName} (${ann.authorRole === 'director' ? 'مدير المؤسسة' : 'إدارة المؤسسة'})
-الفئة المستهدفة: ${
-    ann.target === 'students'
-      ? 'التلاميذ'
-      : ann.target === 'teachers'
-      ? 'السادة الأساتذة'
-      : ann.target === 'staff'
-      ? 'الموظفون والعمال'
-      : 'كافة أسرة المؤسسة'
+  // 2. Try IndexedDB
+  try {
+    const fromIdb = await getFileFromIndexedDb(doc.id);
+    if (fromIdb?.dataUrl) {
+      doc.fileDataUrl = fromIdb.dataUrl;
+      triggerBrowserDownload(fromIdb.dataUrl, targetFilename);
+      return;
+    }
+  } catch {}
+
+  // 3. Try Cloud Firestore chunks
+  try {
+    const fromCloud = await fetchFilePayloadFromFirestore(doc.id);
+    if (fromCloud) {
+      doc.fileDataUrl = fromCloud;
+      saveFileToIndexedDb(doc.id, fromCloud, doc.fileName || '', doc.fileFormat || 'pdf', doc.fileSize || '');
+      triggerBrowserDownload(fromCloud, targetFilename);
+      return;
+    }
+  } catch {}
+
+  // 4. Direct server-side streaming download
+  const serverDownloadUrl = `/api/documents/${encodeURIComponent(doc.id)}/download`;
+  triggerBrowserDownload(serverDownloadUrl, targetFilename);
+}
+
+// Download announcement attachment
+export async function downloadAnnouncementAttachment(ann: SchoolAnnouncement): Promise<void> {
+  const targetFilename = ann.fileName || `${ann.title}.${ann.fileFormat || 'pdf'}`;
+
+  // 1. If explicit data URL in memory
+  if (ann.fileDataUrl && ann.fileDataUrl.startsWith('data:')) {
+    triggerBrowserDownload(ann.fileDataUrl, targetFilename);
+    return;
   }
-درجة الأهمية: ${ann.priority === 'urgent' ? 'عاجل جداً' : ann.priority === 'important' ? 'هام' : 'عادي'}
-----------------------------------------------------------------------
-نص المنشور والتعليمات الرسمية:
-${ann.content}
 
-----------------------------------------------------------------------
-ملاحظة: هذه الوثيقة صادرة رقمياً عبر الأرضية الرسمية لمتوسطة الشهيد بن نعمة مصطفى.`;
+  // 2. Try IndexedDB
+  try {
+    const fromIdb = await getFileFromIndexedDb(ann.id);
+    if (fromIdb?.dataUrl) {
+      ann.fileDataUrl = fromIdb.dataUrl;
+      triggerBrowserDownload(fromIdb.dataUrl, targetFilename);
+      return;
+    }
+  } catch {}
 
-  const blob = new Blob([docContent], { type: 'text/plain;charset=utf-8' });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url;
-  a.download = ann.fileName || `${ann.title.replace(/\s+/g, '_')}.txt`;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(() => URL.revokeObjectURL(url), 2000);
+  // 3. Try Cloud Firestore chunks
+  try {
+    const fromCloud = await fetchFilePayloadFromFirestore(ann.id);
+    if (fromCloud) {
+      ann.fileDataUrl = fromCloud;
+      saveFileToIndexedDb(ann.id, fromCloud, ann.fileName || '', ann.fileFormat || 'pdf', ann.fileSize || '');
+      triggerBrowserDownload(fromCloud, targetFilename);
+      return;
+    }
+  } catch {}
+
+  // 4. Server streaming download
+  const serverDownloadUrl = `/api/announcements/${encodeURIComponent(ann.id)}/download`;
+  triggerBrowserDownload(serverDownloadUrl, targetFilename);
 }
 
 // Announcements
@@ -721,6 +865,17 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
   cachedAnnouncements = updated;
   safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
+
+  // Save attachment to persistent IndexedDB
+  if (newAnn.fileDataUrl) {
+    saveFileToIndexedDb(
+      newAnn.id,
+      newAnn.fileDataUrl,
+      newAnn.fileName || '',
+      newAnn.fileFormat || 'pdf',
+      newAnn.fileSize || ''
+    ).catch(() => {});
+  }
 
   // 1. Direct Cloud Database Save (Firebase Firestore)
   saveAnnouncementToFirestore(newAnn).catch(err => {

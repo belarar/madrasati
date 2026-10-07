@@ -166,11 +166,11 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
           </div>
 
           <div className="flex items-center gap-2 self-end sm:self-auto shrink-0">
-            {onPreviewAttachment && announcement.fileDataUrl && (
+            {onPreviewAttachment && (announcement.fileDataUrl || announcement.fileName) && (
               <button
                 type="button"
                 onClick={() => onPreviewAttachment(announcement)}
-                className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition-all flex items-center gap-1 shadow-2xs"
+                className="px-3 py-1.5 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 text-xs font-bold transition-all flex items-center gap-1 shadow-2xs cursor-pointer"
               >
                 <Eye className="w-3.5 h-3.5" />
                 <span>معاينة</span>

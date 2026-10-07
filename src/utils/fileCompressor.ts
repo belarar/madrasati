@@ -21,12 +21,20 @@ export async function processAndCompressFile(
   maxDimension = 1280,
   quality = 0.75
 ): Promise<ProcessedFile> {
-  const isImage = file.type.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp)$/i.test(file.name);
+  const fileNameLower = file.name.toLowerCase();
+  const fileTypeLower = (file.type || '').toLowerCase();
+
+  const isImage = fileTypeLower.startsWith('image/') || /\.(jpg|jpeg|png|webp|bmp|gif|svg)$/i.test(fileNameLower);
   let format: 'image' | 'pdf' | 'docx' | 'other' = 'other';
 
-  if (file.type.includes('pdf') || file.name.endsWith('.pdf')) {
+  if (fileTypeLower.includes('pdf') || /\.pdf$/i.test(fileNameLower)) {
     format = 'pdf';
-  } else if (file.type.includes('word') || /\.(docx?)$/i.test(file.name)) {
+  } else if (
+    fileTypeLower.includes('word') ||
+    fileTypeLower.includes('officedocument.wordprocessingml') ||
+    fileTypeLower === 'application/msword' ||
+    /\.(docx?)$/i.test(fileNameLower)
+  ) {
     format = 'docx';
   } else if (isImage) {
     format = 'image';

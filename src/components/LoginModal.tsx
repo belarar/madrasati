@@ -490,31 +490,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </>
                   )}
                 </button>
-
-                <div className="pt-2 border-t border-slate-100">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const demoStudent: UserProfile = {
-                        id: 'student-1101248010366200',
-                        identifier: '1101248010366200',
-                        name: 'بطاهر ياسمين',
-                        role: 'student',
-                        classId: '4AM-1',
-                        className: 'رابعة متوسط 01 (مقبلون على شهادة BEM)',
-                        title: 'تلميذة بقسم 4 متوسط 01',
-                      };
-                      registerNewUser(demoStudent);
-                      setCurrentUser(demoStudent);
-                      onLoginSuccess(demoStudent);
-                      onClose();
-                    }}
-                    className="w-full py-2.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold border border-emerald-300 transition-colors flex items-center justify-center gap-2 cursor-pointer"
-                  >
-                    <Sparkles className="w-4 h-4 text-emerald-600" />
-                    <span>دخول سريع فوري كتلميذ (قسم 4 متوسط 01)</span>
-                  </button>
-                </div>
               </form>
             </div>
           ) : (
@@ -626,10 +601,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                   </button>
                 </div>
 
-                {/* Instant Testing Buttons */}
+                {/* Staff Simulation Testing Buttons */}
                 <div className="pt-3 border-t border-slate-200 space-y-2">
                   <p className="text-[11px] font-bold text-slate-500 text-center">
-                    🧪 دخول سريع فوري ومباشر لتجريب ومحاكاة الأدوار:
+                    👔 محاكاة وتجريب أدوار الطاقم الإداري والتربوي (المدير والأساتذة):
                   </p>
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
                     <button

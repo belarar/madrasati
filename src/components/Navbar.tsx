@@ -56,17 +56,6 @@ export const TEST_TEACHER: UserProfile = {
   assignedClasses: ['4AM-1', '4AM-2', '3AM-1', '3AM-2', '2AM-1', '1AM-1'],
 };
 
-export const TEST_STUDENT: UserProfile = {
-  id: 'student-1101248010366200',
-  identifier: '1101248010366200',
-  name: 'بطاهر ياسمين',
-  role: 'student',
-  classId: '4AM-1',
-  className: 'رابعة متوسط 01 (مقبلون على شهادة BEM)',
-  title: 'تلميذة بقسم 4 متوسط 01',
-  phone: '0550000003',
-};
-
 interface NavbarProps {
   currentUser: UserProfile | null;
   onOpenLogin: () => void;
@@ -367,24 +356,6 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
           >
             <User className="w-3 h-3 text-blue-400" />
             <span>👨‍🏫 أستاذة (حمزة نفيسة - إنجليزية)</span>
-          </button>
-
-          <button
-            type="button"
-            onClick={() => {
-              registerNewUser(TEST_STUDENT);
-              setCurrentUser(TEST_STUDENT);
-              onSelectUser(TEST_STUDENT);
-            }}
-            className={`px-2.5 py-1 rounded-lg font-bold transition-all flex items-center gap-1 text-[11px] cursor-pointer shadow-2xs active:scale-95 ${
-              currentUser?.role === 'student'
-                ? 'bg-emerald-700 text-white shadow-xs'
-                : 'bg-white hover:bg-emerald-50 text-emerald-900 border border-emerald-200'
-            }`}
-            title="تجريب فوري كتلميذة"
-          >
-            <GraduationCap className="w-3 h-3 text-emerald-400" />
-            <span>🎓 تلميذة (بطاهر ياسمين - 4 متوسط)</span>
           </button>
         </div>
       </div>

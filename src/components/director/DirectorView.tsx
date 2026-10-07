@@ -209,29 +209,43 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     }, 1800);
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    let format: FileFormat = 'pdf';
     const ext = file.name.split('.').pop()?.toLowerCase();
-    if (ext === 'pdf') setDocFileFormat('pdf');
-    else if (ext === 'docx' || ext === 'doc') setDocFileFormat('docx');
-    else if (ext === 'xlsx' || ext === 'xls') setDocFileFormat('xlsx');
+    if (ext === 'pdf') format = 'pdf';
+    else if (ext === 'docx' || ext === 'doc') format = 'docx';
+    else if (ext === 'xlsx' || ext === 'xls') format = 'xlsx';
+    else if (ext === 'pptx' || ext === 'ppt') format = 'pptx';
+    else if (file.type.startsWith('image/')) format = 'image';
 
-    const formattedSize =
-      file.size > 1024 * 1024
-        ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
-        : `${Math.round(file.size / 1024)} KB`;
+    setDocFileFormat(format);
 
-    const reader = new FileReader();
-    reader.onload = () => {
+    try {
+      const processed = await processAndCompressFile(file);
       setUploadedFile({
-        name: file.name,
-        size: formattedSize,
-        dataUrl: reader.result as string,
+        name: processed.name,
+        size: processed.sizeFormatted,
+        dataUrl: processed.dataUrl,
       });
-    };
-    reader.readAsDataURL(file);
+    } catch {
+      const formattedSize =
+        file.size > 1024 * 1024
+          ? `${(file.size / (1024 * 1024)).toFixed(1)} MB`
+          : `${Math.round(file.size / 1024)} KB`;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        setUploadedFile({
+          name: file.name,
+          size: formattedSize,
+          dataUrl: reader.result as string,
+        });
+      };
+      reader.readAsDataURL(file);
+    }
   };
 
   const handleUploadAdminDoc = async (e: React.FormEvent) => {
