@@ -483,6 +483,61 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </>
                   )}
                 </button>
+
+                {/* Quick Simulation Buttons for Testing Student Chat */}
+                <div className="pt-3 border-t border-slate-200 space-y-2">
+                  <p className="text-[11px] font-bold text-emerald-800 text-center flex items-center justify-center gap-1">
+                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>تجربة ومحاكاة محادثة التلاميذ (زميلان في نفس القسم لاختبار المراسلة الفورية):</span>
+                  </p>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const s1: UserProfile = {
+                          id: 'student-1101414140032700',
+                          identifier: '1101414140032700',
+                          name: 'عدة عمار فاطمة هاجر',
+                          role: 'student',
+                          classId: '2AM-2',
+                          className: 'ثانية متوسط 02',
+                          title: 'تلميذ(ة) بقسم ثانية متوسط 02',
+                        };
+                        registerNewUser(s1);
+                        setCurrentUser(s1);
+                        onLoginSuccess(s1);
+                        onClose();
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold border border-emerald-300 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <UserCheck className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>دخول كتلميذة 1: عدة عمار فاطمة هاجر (2AM-2)</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const s2: UserProfile = {
+                          id: 'student-1101501160038700',
+                          identifier: '1101501160038700',
+                          name: 'رمضاوي فرح زوليخة',
+                          role: 'student',
+                          classId: '2AM-2',
+                          className: 'ثانية متوسط 02',
+                          title: 'تلميذ(ة) بقسم ثانية متوسط 02',
+                        };
+                        registerNewUser(s2);
+                        setCurrentUser(s2);
+                        onLoginSuccess(s2);
+                        onClose();
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-900 text-xs font-bold border border-teal-300 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
+                    >
+                      <UserCheck className="w-3.5 h-3.5 text-teal-700" />
+                      <span>دخول كزميلتها 2: رمضاوي فرح زوليخة (2AM-2)</span>
+                    </button>
+                  </div>
+                </div>
               </form>
             </div>
           ) : (

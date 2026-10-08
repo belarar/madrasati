@@ -57,6 +57,55 @@ function loadDatabase(): SchoolDatabase {
       if (parsed && Array.isArray(parsed.documents)) {
         if (!Array.isArray(parsed.privateConversations)) parsed.privateConversations = [];
         if (!Array.isArray(parsed.privateMessages)) parsed.privateMessages = [];
+
+        // Seed initial sample conversation between two 2AM-2 classmates if empty
+        if (parsed.privateConversations.length === 0) {
+          const sampleConvId = 'conv-init-sample-2am2';
+          parsed.privateConversations = [
+            {
+              id: sampleConvId,
+              classId: '2AM-2',
+              participantIds: ['1101414140032700', '1101501160038700'],
+              participantNames: {
+                '1101414140032700': 'عدة عمار فاطمة هاجر',
+                '1101501160038700': 'رمضاوي فرح زوليخة',
+              },
+              title: 'رمضاوي فرح زوليخة',
+              createdAt: new Date(Date.now() - 3600000 * 4).toISOString(),
+              updatedAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+              lastMessage: 'نعم بالتأكيد يا هاجر، سأراجع معك حل المسألة الثانية في مادة الرياضيات.',
+              lastMessageAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+              lastSenderName: 'رمضاوي فرح زوليخة',
+              isGroup: false,
+            },
+          ];
+          parsed.privateMessages = [
+            {
+              id: 'pmsg-init-1',
+              conversationId: sampleConvId,
+              senderId: '1101414140032700',
+              senderName: 'عدة عمار فاطمة هاجر',
+              content: 'السلام عليكم يا فرح، هل قمتِ بحل تمرين الرياضيات المخصص لليوم؟',
+              createdAt: new Date(Date.now() - 3600000 * 3).toISOString(),
+            },
+            {
+              id: 'pmsg-init-2',
+              conversationId: sampleConvId,
+              senderId: '1101501160038700',
+              senderName: 'رمضاوي فرح زوليخة',
+              content: 'وعليكم السلام يا هاجر! نعم، انتهيت منه قبل قليل واستفدت من تلخيص الأستاذة.',
+              createdAt: new Date(Date.now() - 3600000 * 2.5).toISOString(),
+            },
+            {
+              id: 'pmsg-init-3',
+              conversationId: sampleConvId,
+              senderId: '1101501160038700',
+              senderName: 'رمضاوي فرح زوليخة',
+              content: 'نعم بالتأكيد يا هاجر، سأراجع معك حل المسألة الثانية في مادة الرياضيات.',
+              createdAt: new Date(Date.now() - 3600000 * 2).toISOString(),
+            },
+          ];
+        }
         // Sanitize and normalize documents
         parsed.documents = parsed.documents.map((d: any) => {
           const targetClasses = Array.isArray(d.targetClasses) && d.targetClasses.length > 0 ? d.targetClasses : ['ALL'];
@@ -647,6 +696,34 @@ app.delete('/api/peer-exchanges/:id', (req, res) => {
 });
 
 // 7. Student Peer Conversations API (المحادثات الموجهة بين تلاميذ القسم - تحت الرقابة التربوية للمدير والناظر)
+app.get('/api/conversations-sync', (req, res) => {
+  const { studentId, role, classId } = req.query;
+
+  let convs: any[] = [];
+  let msgs: any[] = [];
+
+  if (role === 'director' || role === 'censor') {
+    convs = db.privateConversations || [];
+    if (classId && typeof classId === 'string' && classId !== 'ALL') {
+      convs = convs.filter(c => c.classId === classId);
+    }
+    const convIds = new Set(convs.map(c => c.id));
+    msgs = (db.privateMessages || []).filter(m => convIds.has(m.conversationId));
+    return res.json({ conversations: convs, messages: msgs });
+  }
+
+  if (studentId && typeof studentId === 'string') {
+    convs = (db.privateConversations || []).filter(c =>
+      Array.isArray(c.participantIds) && c.participantIds.includes(studentId)
+    );
+    const convIds = new Set(convs.map(c => c.id));
+    msgs = (db.privateMessages || []).filter(m => convIds.has(m.conversationId));
+    return res.json({ conversations: convs, messages: msgs });
+  }
+
+  return res.json({ conversations: [], messages: [] });
+});
+
 app.get('/api/conversations', (req, res) => {
   const { studentId, role, classId } = req.query;
 

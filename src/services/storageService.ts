@@ -106,6 +106,12 @@ export function initStorage(): void {
         cachedPeerExchanges = null;
         window.dispatchEvent(new Event('peer-exchanges-change'));
       }
+      if (e.key === STORAGE_KEYS.PRIVATE_CONVERSATIONS) {
+        window.dispatchEvent(new Event('private-conversations-change'));
+      }
+      if (e.key === STORAGE_KEYS.PRIVATE_MESSAGES) {
+        window.dispatchEvent(new Event('private-messages-change'));
+      }
       if (e.key === STORAGE_KEYS.CURRENT_USER) {
         window.dispatchEvent(new Event('auth-change'));
       }
@@ -1616,35 +1622,52 @@ export async function syncWithServer(): Promise<void> {
       window.dispatchEvent(new Event('notifications-change'));
     }
 
-    // 7. Student Peer Conversations Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
+    // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
     if (user) {
-      if (user.role === 'student') {
-        try {
-          const convRes = await fetch(`/api/conversations?studentId=${encodeURIComponent(user.identifier)}`);
-          if (convRes.ok) {
-            const serverConvs: PrivateConversation[] = await convRes.json();
+      try {
+        let syncUrl = '';
+        if (user.role === 'student') {
+          syncUrl = `/api/conversations-sync?studentId=${encodeURIComponent(user.identifier)}`;
+        } else if (user.role === 'director' || user.role === 'censor') {
+          syncUrl = `/api/conversations-sync?role=${encodeURIComponent(user.role)}`;
+        }
+
+        if (syncUrl) {
+          const syncRes = await fetch(syncUrl);
+          if (syncRes.ok) {
+            const data = await syncRes.json();
+            const serverConvs: PrivateConversation[] = data.conversations || [];
+            const serverMsgs: PrivateMessage[] = data.messages || [];
+
             if (Array.isArray(serverConvs)) {
               const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
               const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
-              const localOtherUserConvs = localConvs.filter(c => !c.participantIds.includes(user.identifier));
-              const merged = [...localOtherUserConvs, ...serverConvs];
-              safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(merged));
-              window.dispatchEvent(new Event('private-conversations-change'));
+              const localOtherUserConvs = user.role === 'student'
+                ? localConvs.filter(c => !c.participantIds?.includes(user.identifier))
+                : [];
+              const mergedConvs = [...localOtherUserConvs, ...serverConvs];
+              const prevStr = JSON.stringify(localConvs.map(c => ({ id: c.id, upd: c.updatedAt, last: c.lastMessage })));
+              const newStr = JSON.stringify(mergedConvs.map(c => ({ id: c.id, upd: c.updatedAt, last: c.lastMessage })));
+              if (prevStr !== newStr) {
+                safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(mergedConvs));
+                window.dispatchEvent(new Event('private-conversations-change'));
+              }
+            }
+
+            if (Array.isArray(serverMsgs) && serverMsgs.length > 0) {
+              const rawMsgs = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+              const localMsgs: PrivateMessage[] = rawMsgs ? JSON.parse(rawMsgs) : [];
+              const serverMsgIds = new Set(serverMsgs.map(m => m.id));
+              const localUnique = localMsgs.filter(m => !serverMsgIds.has(m.id));
+              const mergedMsgs = [...serverMsgs, ...localUnique];
+              if (mergedMsgs.length !== localMsgs.length) {
+                safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify(mergedMsgs));
+                window.dispatchEvent(new Event('private-messages-change'));
+              }
             }
           }
-        } catch {}
-      } else if (user.role === 'director' || user.role === 'censor') {
-        try {
-          const convRes = await fetch(`/api/conversations?role=${encodeURIComponent(user.role)}`);
-          if (convRes.ok) {
-            const serverConvs: PrivateConversation[] = await convRes.json();
-            if (Array.isArray(serverConvs)) {
-              safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(serverConvs));
-              window.dispatchEvent(new Event('private-conversations-change'));
-            }
-          }
-        } catch {}
-      }
+        }
+      } catch {}
     }
   } catch (err) {
     console.debug('[Sync] Sync network or transient offline:', err);

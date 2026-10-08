@@ -33,7 +33,9 @@ import {
   getClassmatesForStudent,
   getLocalPrivateMessages,
   getPrivateConversations,
+  safeSetItem,
   sendPrivateMessage,
+  STORAGE_KEYS,
 } from '../../services/storageService';
 import {
   initPrivateConversationsSync,
@@ -106,8 +108,33 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
     return conversations.find(c => c.id === activeConvId) || null;
   }, [conversations, activeConvId]);
 
-  // Realtime Cloud + Local Sync for Conversations
+  // Realtime Cloud + Local + Server Sync for Conversations
   useEffect(() => {
+    // 1. Initial local load
+    setConversations(getPrivateConversations(currentUser.identifier));
+
+    // 2. Fetch from server and sync
+    const fetchServerConvs = () => {
+      fetch(`/api/conversations?studentId=${encodeURIComponent(currentUser.identifier)}`)
+        .then(res => res.json())
+        .then(serverConvs => {
+          if (Array.isArray(serverConvs)) {
+            const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+            const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+            const otherUserConvs = localConvs.filter(c => !c.participantIds?.includes(currentUser.identifier));
+            const merged = [...otherUserConvs, ...serverConvs];
+            safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(merged));
+            setConversations(getPrivateConversations(currentUser.identifier));
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchServerConvs();
+    // Live active polling every 1.8 seconds to catch incoming conversations in real-time
+    const convIntervalId = setInterval(fetchServerConvs, 1800);
+
+    // 3. Firestore snapshot listener
     const unsubscribeCloud = initPrivateConversationsSync(
       currentUser.identifier,
       (cloudConvs: PrivateConversation[]) => {
@@ -117,6 +144,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
       }
     );
 
+    // 4. Local Event listener (dispatched on changes in current tab or other tabs)
     const handleLocalConvChange = () => {
       setConversations(getPrivateConversations(currentUser.identifier));
     };
@@ -124,12 +152,13 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
     window.addEventListener('private-conversations-change', handleLocalConvChange);
 
     return () => {
+      clearInterval(convIntervalId);
       unsubscribeCloud();
       window.removeEventListener('private-conversations-change', handleLocalConvChange);
     };
   }, [currentUser.identifier]);
 
-  // Realtime Cloud + Local Sync for Messages of Active Conversation
+  // Realtime Cloud + Local + Server Sync for Messages of Active Conversation
   useEffect(() => {
     if (!activeConvId) {
       setMessages([]);
@@ -139,15 +168,26 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
     // 1. Initial local load
     setMessages(getLocalPrivateMessages(activeConvId));
 
-    // 2. Fetch from server
-    fetch(`/api/conversations/${encodeURIComponent(activeConvId)}/messages?studentId=${encodeURIComponent(currentUser.identifier)}`)
-      .then(res => res.json())
-      .then(serverMsgs => {
-        if (Array.isArray(serverMsgs) && serverMsgs.length > 0) {
-          setMessages(serverMsgs);
-        }
-      })
-      .catch(() => {});
+    // 2. Fetch from server & keep active polling
+    const fetchActiveMessages = () => {
+      fetch(`/api/conversations/${encodeURIComponent(activeConvId)}/messages?studentId=${encodeURIComponent(currentUser.identifier)}`)
+        .then(res => res.json())
+        .then(serverMsgs => {
+          if (Array.isArray(serverMsgs)) {
+            setMessages(serverMsgs);
+            // Sync into localStorage
+            const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+            const localMsgs: PrivateMessage[] = raw ? JSON.parse(raw) : [];
+            const otherMsgs = localMsgs.filter(m => m.conversationId !== activeConvId);
+            safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify([...otherMsgs, ...serverMsgs]));
+          }
+        })
+        .catch(() => {});
+    };
+
+    fetchActiveMessages();
+    // Live active polling every 1.5 seconds for instant chat experience across devices and tabs
+    const msgIntervalId = setInterval(fetchActiveMessages, 1500);
 
     // 3. Firestore Realtime Sync
     const unsubscribeCloud = initPrivateMessagesSync(activeConvId, (cloudMsgs: PrivateMessage[]) => {
@@ -163,6 +203,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
     window.addEventListener('private-messages-change', handleLocalMsgChange);
 
     return () => {
+      clearInterval(msgIntervalId);
       unsubscribeCloud();
       window.removeEventListener('private-messages-change', handleLocalMsgChange);
     };
@@ -187,7 +228,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
     setAttachedFile(null);
 
     try {
-      await sendPrivateMessage({
+      const sent = await sendPrivateMessage({
         conversationId: activeConversation.id,
         senderId: currentUser.identifier,
         senderName: currentUser.name,
@@ -197,6 +238,9 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
         fileFormat: file?.format,
         fileDataUrl: file?.dataUrl,
       });
+
+      // Optimistically append to local state immediately for zero-lag UI
+      setMessages(prev => (prev.some(m => m.id === sent.id) ? prev : [...prev, sent]));
     } catch (err) {
       console.error('Error sending private message:', err);
     } finally {
@@ -234,6 +278,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
   // Handle Start Single Chat
   const handleStartSingleChat = (classmate: UserProfile) => {
     const conv = createOrGetPrivateConversation(currentUser, [classmate]);
+    setConversations(getPrivateConversations(currentUser.identifier));
     setActiveConvId(conv.id);
     setShowNewChatModal(false);
     setShowMobileChat(true);
@@ -243,6 +288,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
   const handleStartGroupChat = () => {
     if (selectedClassmates.length === 0) return;
     const conv = createOrGetPrivateConversation(currentUser, selectedClassmates, groupTitleInput);
+    setConversations(getPrivateConversations(currentUser.identifier));
     setActiveConvId(conv.id);
     setSelectedClassmates([]);
     setGroupTitleInput('');
@@ -405,9 +451,9 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
                 <div className="w-12 h-12 rounded-2xl bg-emerald-50 text-emerald-600 flex items-center justify-center mx-auto">
                   <Lock className="w-6 h-6" />
                 </div>
-                <div className="text-xs font-bold text-slate-700">لا توجد محادثات سرية نشطة حالياً</div>
+                <div className="text-xs font-bold text-slate-700">لا توجد محادثات نشطة حالياً</div>
                 <p className="text-[11px] text-slate-400 leading-relaxed">
-                  ابدأ محادثة خاصة الآن مع أي زميل ترغب في التحدث معه أو دراسة الدروس معاً.
+                  ابدأ محادثة دراسية الآن مع أي زميل في قسمك لمناقشة الدروس والواجبات المنزلية.
                 </p>
                 <button
                   onClick={() => setShowNewChatModal(true)}
@@ -757,7 +803,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
                     type="text"
                     value={inputText}
                     onChange={e => setInputText(e.target.value)}
-                    placeholder="اكتب رسالتك السرية لزميلك هنا..."
+                    placeholder="اكتب رسالتك لزميلك هنا (خاضعة للرقابة التربوية للمدير والناظر)..."
                     className="flex-1 px-4 py-2.5 rounded-2xl bg-slate-50 focus:bg-white border border-slate-200 focus:border-emerald-600 outline-none text-xs sm:text-sm text-slate-800 transition-all placeholder:text-slate-400"
                   />
 
@@ -777,14 +823,14 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
             /* No conversation selected placeholder */
             <div className="flex-1 flex flex-col items-center justify-center p-8 text-center text-slate-400 space-y-4">
               <div className="w-16 h-16 rounded-3xl bg-emerald-50 text-emerald-600 flex items-center justify-center shadow-inner">
-                <Lock className="w-8 h-8" />
+                <ShieldCheck className="w-8 h-8" />
               </div>
               <div className="space-y-1 max-w-sm">
                 <h4 className="text-base font-extrabold text-slate-800">
-                  فضاء المحادثات الخاصة المشفرة بين الزملاء
+                  فضاء محادثات التلاميذ المباشرة (المراقبة تربوياً)
                 </h4>
                 <p className="text-xs text-slate-500 leading-relaxed">
-                  اختر زميلاً من القائمة الجانبية أو ابدأ محادثة جديدة سرية مع أي تلميذ في قسمك الدراسي (أو عدة تلاميذ).
+                  اختر زميلاً من القائمة الجانبية أو ابدأ محادثة جديدة موجهة مع أي تلميذ في قسمك الدراسي (أو عدة تلاميذ). جميع المحادثات خاضعة للمتابعة التربوية لإدارة المتوسطة.
                 </p>
               </div>
               <button
@@ -812,14 +858,14 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
             <div className="p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-emerald-800 to-teal-800 text-white">
               <div className="flex items-center gap-2.5">
                 <div className="w-9 h-9 rounded-xl bg-white/20 flex items-center justify-center text-white shrink-0">
-                  <Lock className="w-5 h-5" />
+                  <ShieldCheck className="w-5 h-5" />
                 </div>
                 <div>
                   <h3 className="text-base font-extrabold text-white">
-                    بدء محادثة خاصة وسرية جديدة
+                    بدء محادثة مباشرة جديدة بين الزملاء
                   </h3>
                   <p className="text-xs text-emerald-100">
-                    قسمك: {studentClassName} ({classmates.length} زميلاً)
+                    قسمك: {studentClassName} ({classmates.length} زميلاً) • خاضعة للمتابعة التربوية
                   </p>
                 </div>
               </div>

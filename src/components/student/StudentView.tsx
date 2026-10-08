@@ -26,7 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SUBJECTS } from '../../data/mockData';
-import { getPeerExchanges, registerNewUser } from '../../services/storageService';
+import { getPeerExchanges, getPrivateConversations, registerNewUser } from '../../services/storageService';
 import {
   ParentSummon,
   SchoolAnnouncement,
@@ -63,6 +63,17 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [activeTab, setActiveTab] = useState<'documents' | 'private_chat' | 'peer_exchange' | 'announcements' | 'summons'>('documents');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [selectedSummon, setSelectedSummon] = useState<ParentSummon | null>(null);
+  const [conversationsCount, setConversationsCount] = useState(() =>
+    getPrivateConversations(currentUser.identifier).length
+  );
+
+  React.useEffect(() => {
+    const handleConvChange = () => {
+      setConversationsCount(getPrivateConversations(currentUser.identifier).length);
+    };
+    window.addEventListener('private-conversations-change', handleConvChange);
+    return () => window.removeEventListener('private-conversations-change', handleConvChange);
+  }, [currentUser.identifier]);
 
   // Edit Profile States
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -342,7 +353,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
             <MessageCircle className="w-4 h-4 text-emerald-600" />
             <span>محادثات الزملاء المباشرة 💬</span>
             <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full font-bold">
-              مراقبة تربوياً
+              {conversationsCount > 0 ? `${conversationsCount} محادثة • مراقبة` : 'مراقبة تربوياً'}
             </span>
           </button>
 
