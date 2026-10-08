@@ -16,6 +16,8 @@ import {
   GraduationCap,
   Info,
   Layers,
+  Lock,
+  MessageCircle,
   Search,
   Share2,
   Sparkles,
@@ -37,6 +39,7 @@ import { DocumentCard } from '../common/DocumentCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { SummonModal } from '../common/SummonModal';
 import { ClassmatesChannel } from './ClassmatesChannel';
+import { PrivateStudentChat } from './PrivateStudentChat';
 
 interface StudentViewProps {
   currentUser: UserProfile;
@@ -57,7 +60,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [selectedType, setSelectedType] = useState<string>('ALL');
   const [scopeFilter, setScopeFilter] = useState<'all_school' | 'my_class'>('all_school');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'documents' | 'peer_exchange' | 'announcements' | 'summons'>('documents');
+  const [activeTab, setActiveTab] = useState<'documents' | 'private_chat' | 'peer_exchange' | 'announcements' | 'summons'>('documents');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [selectedSummon, setSelectedSummon] = useState<ParentSummon | null>(null);
 
@@ -326,6 +329,21 @@ export const StudentView: React.FC<StudentViewProps> = ({
           >
             <BookOpen className="w-4 h-4" />
             <span>الوثائق والدروس والفروض ({relevantDocuments.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('private_chat')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all relative ${
+              activeTab === 'private_chat'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Lock className="w-4 h-4 text-emerald-600" />
+            <span>المحادثات الخاصة والسرية 🔒</span>
+            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
+              جديد
+            </span>
           </button>
 
           <button
@@ -640,11 +658,17 @@ export const StudentView: React.FC<StudentViewProps> = ({
         </div>
       )}
 
+      {/* View: Private Student Chat */}
+      {activeTab === 'private_chat' && (
+        <PrivateStudentChat currentUser={currentUser} />
+      )}
+
       {/* View: Classmates Channel */}
       {activeTab === 'peer_exchange' && (
         <ClassmatesChannel
           currentUser={currentUser}
           onPostUpdated={onRefreshData}
+          onOpenPrivateChat={() => setActiveTab('private_chat')}
         />
       )}
 

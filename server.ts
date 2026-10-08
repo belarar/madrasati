@@ -23,7 +23,7 @@ const DB_FILE = path.resolve(DATA_DIR, 'school_database.json');
 
 export interface AppNotification {
   id: string;
-  type: 'document' | 'announcement' | 'summon' | 'peer_post' | 'peer_reply';
+  type: 'document' | 'announcement' | 'summon' | 'peer_post' | 'peer_reply' | 'private_message';
   title: string;
   message: string;
   targetRole?: 'all' | 'students' | 'teachers' | 'staff' | 'director' | 'censor';

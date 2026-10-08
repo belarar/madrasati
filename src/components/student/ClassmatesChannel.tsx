@@ -13,6 +13,7 @@ import {
   Heart,
   HelpCircle,
   Image as ImageIcon,
+  Lock,
   MessageCircle,
   Paperclip,
   Plus,
@@ -47,11 +48,13 @@ import { processAndCompressFile } from '../../utils/fileCompressor';
 interface ClassmatesChannelProps {
   currentUser: UserProfile;
   onPostUpdated?: () => void;
+  onOpenPrivateChat?: () => void;
 }
 
 export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
   currentUser,
   onPostUpdated,
+  onOpenPrivateChat,
 }) => {
   const studentClassId = currentUser.classId || '2AM-2';
   const studentClassName = currentUser.className || 'القسم الدراسي';
@@ -322,6 +325,17 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
               <HelpCircle className="w-4 h-4 text-amber-300" />
               <span>طلب مساعدة / درس فاتني</span>
             </button>
+
+            {onOpenPrivateChat && (
+              <button
+                onClick={onOpenPrivateChat}
+                className="py-3 px-4 rounded-2xl bg-emerald-950/90 hover:bg-emerald-950 text-emerald-200 border border-emerald-400/40 font-bold text-xs sm:text-sm shadow-md transition-all flex items-center gap-2 active:scale-98"
+                title="محادثة مشفرة وسرية بينك وبين الزميل الذي تختاره فقط"
+              >
+                <Lock className="w-4 h-4 text-emerald-400" />
+                <span>محادثة خاصة وسرية 🔒</span>
+              </button>
+            )}
           </div>
         </div>
       </div>
