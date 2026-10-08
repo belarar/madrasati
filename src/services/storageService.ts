@@ -1611,22 +1611,35 @@ export async function syncWithServer(): Promise<void> {
       window.dispatchEvent(new Event('notifications-change'));
     }
 
-    // 7. Student Private Conversations Sync
-    if (user && user.role === 'student') {
-      try {
-        const convRes = await fetch(`/api/conversations?studentId=${encodeURIComponent(user.identifier)}`);
-        if (convRes.ok) {
-          const serverConvs: PrivateConversation[] = await convRes.json();
-          if (Array.isArray(serverConvs)) {
-            const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
-            const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
-            const localOtherUserConvs = localConvs.filter(c => !c.participantIds.includes(user.identifier));
-            const merged = [...localOtherUserConvs, ...serverConvs];
-            safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(merged));
-            window.dispatchEvent(new Event('private-conversations-change'));
+    // 7. Student Peer Conversations Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
+    if (user) {
+      if (user.role === 'student') {
+        try {
+          const convRes = await fetch(`/api/conversations?studentId=${encodeURIComponent(user.identifier)}`);
+          if (convRes.ok) {
+            const serverConvs: PrivateConversation[] = await convRes.json();
+            if (Array.isArray(serverConvs)) {
+              const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+              const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+              const localOtherUserConvs = localConvs.filter(c => !c.participantIds.includes(user.identifier));
+              const merged = [...localOtherUserConvs, ...serverConvs];
+              safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(merged));
+              window.dispatchEvent(new Event('private-conversations-change'));
+            }
           }
-        }
-      } catch {}
+        } catch {}
+      } else if (user.role === 'director' || user.role === 'censor') {
+        try {
+          const convRes = await fetch(`/api/conversations?role=${encodeURIComponent(user.role)}`);
+          if (convRes.ok) {
+            const serverConvs: PrivateConversation[] = await convRes.json();
+            if (Array.isArray(serverConvs)) {
+              safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(serverConvs));
+              window.dispatchEvent(new Event('private-conversations-change'));
+            }
+          }
+        } catch {}
+      }
     }
   } catch (err) {
     console.debug('[Sync] Sync network or transient offline:', err);
@@ -1870,6 +1883,53 @@ export async function sendPrivateMessage(
   }).catch(() => {});
 
   return newMsg;
+}
+
+// ================= الرقابة التربوية للمدير والناظر على محادثات التلاميذ =================
+
+// جلب كافة محادثات التلاميذ عبر كافة الأقسام لأغراض المتابعة الإدارية والتربوية
+export function getSupervisedConversations(classId?: string): PrivateConversation[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+    const list: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+    if (classId && classId !== 'ALL') {
+      return list
+        .filter(c => c.classId === classId)
+        .sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+    }
+    return list.sort((a, b) => new Date(b.updatedAt || b.createdAt).getTime() - new Date(a.updatedAt || a.createdAt).getTime());
+  } catch {
+    return [];
+  }
+}
+
+// جلب رسائل محادثة معينة للمدير أو الناظر للتدقيق البيداغوجي والانضباطي
+export async function getSupervisedMessages(conversationId: string, role: 'director' | 'censor'): Promise<PrivateMessage[]> {
+  if (!conversationId) return [];
+  const localMsgs = getLocalPrivateMessages(conversationId);
+  try {
+    const res = await fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages?role=${role}`);
+    if (res.ok) {
+      const serverMsgs: PrivateMessage[] = await res.json();
+      if (Array.isArray(serverMsgs) && serverMsgs.length > 0) {
+        return serverMsgs;
+      }
+    }
+  } catch {}
+  return localMsgs;
+}
+
+// حذف رسالة مخالفة من طرف المدير أو الناظر
+export async function deleteSupervisedMessage(conversationId: string, messageId: string): Promise<void> {
+  const rawMsgs = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+  const allMsgs: PrivateMessage[] = rawMsgs ? JSON.parse(rawMsgs) : [];
+  const updatedMsgs = allMsgs.filter(m => m.id !== messageId);
+  safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify(updatedMsgs));
+  window.dispatchEvent(new Event('private-messages-change'));
+
+  fetch(`/api/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`, {
+    method: 'DELETE',
+  }).catch(() => {});
 }
 
 

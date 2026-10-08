@@ -339,10 +339,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Lock className="w-4 h-4 text-emerald-600" />
-            <span>المحادثات الخاصة والسرية 🔒</span>
-            <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
-              جديد
+            <MessageCircle className="w-4 h-4 text-emerald-600" />
+            <span>محادثات الزملاء المباشرة 💬</span>
+            <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full font-bold">
+              مراقبة تربوياً
             </span>
           </button>
 

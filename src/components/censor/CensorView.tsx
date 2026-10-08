@@ -45,6 +45,7 @@ import {
 import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { SummonModal } from '../common/SummonModal';
+import { StudentChatSupervisionPanel } from '../common/StudentChatSupervisionPanel';
 import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface CensorViewProps {
@@ -60,7 +61,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
   summons,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'summons' | 'new-summon' | 'announcements' | 'new-announcement'>('summons');
+  const [activeTab, setActiveTab] = useState<'summons' | 'new-summon' | 'announcements' | 'new-announcement' | 'chat-supervision'>('summons');
   const [selectedSummonModal, setSelectedSummonModal] = useState<ParentSummon | null>(null);
 
   // New Summon Form
@@ -339,6 +340,21 @@ export const CensorView: React.FC<CensorViewProps> = ({
           >
             <Megaphone className="w-4 h-4" />
             <span>نشر إعلان جديد للتلاميذ</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('chat-supervision')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'chat-supervision'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Shield className="w-4 h-4 text-teal-600" />
+            <span>مراقبة محادثات التلاميذ 🛡️</span>
+            <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
+              رقابة تربوية
+            </span>
           </button>
         </div>
       </div>
@@ -855,6 +871,11 @@ export const CensorView: React.FC<CensorViewProps> = ({
             </button>
           </form>
         </div>
+      )}
+
+      {/* Tab: Student Chat Supervision */}
+      {activeTab === 'chat-supervision' && (
+        <StudentChatSupervisionPanel currentUser={currentUser} />
       )}
 
       {/* Document Preview Modal */}

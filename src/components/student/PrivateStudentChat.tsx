@@ -318,8 +318,8 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
 
   return (
     <div className="space-y-4">
-      {/* Privacy Guarantee Banner */}
-      <div className="bg-gradient-to-r from-emerald-900 via-teal-900 to-slate-900 text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+      {/* Supervision & Classmate Privacy Banner */}
+      <div className="bg-gradient-to-r from-slate-900 via-emerald-950 to-teal-950 text-white rounded-2xl p-4 sm:p-5 shadow-sm border border-emerald-500/30 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
         <div className="flex items-start sm:items-center gap-3.5">
           <div className="w-10 h-10 rounded-xl bg-emerald-500/20 border border-emerald-400/40 flex items-center justify-center text-emerald-300 shrink-0">
             <ShieldCheck className="w-6 h-6" />
@@ -327,14 +327,14 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
           <div>
             <div className="flex items-center gap-2">
               <h3 className="text-sm sm:text-base font-extrabold text-white flex items-center gap-1.5">
-                <span>المحادثات الخاصة والمشفرة بين زملاء القسم</span>
-                <span className="text-[10px] bg-emerald-500 text-emerald-950 font-black px-2 py-0.5 rounded-full">
-                  سرية تامة 🔒
+                <span>محادثات الزملاء المباشرة (1 لـ 1 ومجموعات)</span>
+                <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
+                  مراقبة تربوياً من طرف المدير والناظر ⚖️
                 </span>
               </h3>
             </div>
             <p className="text-xs text-emerald-100/90 leading-relaxed mt-0.5">
-              محادثاتك هنا محصورة بينك وبين الزميل الذي تختاره فقط (أو الزملاء الذين تحددهم للمجموعة). لا يمكن لبقية تلاميذ القسم أو أي طرف آخر الاطلاع عليها أو معرفة وجودها.
+              تتيح لك التحدث مع الزميل الذي تختاره فقط (أو عدة زملاء) لتبادل الدروس دون اطلاع بقية تلاميذ القسم، مع خضوعها للإشراف والرقابة التربوية الرسمية للمدير والناظر لحماية الانضباط المدرسي.
             </p>
           </div>
         </div>
@@ -350,7 +350,7 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
           className="px-4 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-emerald-950 font-bold text-xs sm:text-sm flex items-center justify-center gap-2 shadow-sm transition-all shrink-0 active:scale-98"
         >
           <Plus className="w-4 h-4" />
-          <span>بدء محادثة سرية جديدة</span>
+          <span>بدء محادثة دراسية مع زميل</span>
         </button>
       </div>
 
@@ -534,9 +534,9 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
                       <h4 className="text-xs sm:text-sm font-extrabold text-slate-900 truncate">
                         {getConvTitle(activeConversation)}
                       </h4>
-                      <span className="inline-flex items-center gap-1 text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold shrink-0">
-                        <Lock className="w-2.5 h-2.5" />
-                        <span>سرية</span>
+                      <span className="inline-flex items-center gap-1 text-[10px] bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full font-bold shrink-0">
+                        <Shield className="w-2.5 h-2.5 text-amber-700" />
+                        <span>مراقبة تربوياً</span>
                       </span>
                     </div>
 
@@ -563,11 +563,11 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
 
               {/* Chat Messages Feed */}
               <div className="flex-1 overflow-y-auto p-4 space-y-3 bg-gradient-to-b from-slate-100/50 to-white">
-                {/* Privacy Reminder Badge */}
+                {/* Supervision Badge */}
                 <div className="text-center my-2">
-                  <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-[11px] font-semibold bg-emerald-50 text-emerald-800 border border-emerald-200 shadow-2xs">
-                    <Lock className="w-3 h-3 text-emerald-600" />
-                    <span>محادثة مشفرة وخاصة بالكامل • لا يراها سوى أطراف هذه المحادثة</span>
+                  <span className="inline-flex items-center gap-1.5 px-3.5 py-1.5 rounded-full text-[11px] font-semibold bg-amber-50 text-amber-900 border border-amber-300 shadow-2xs">
+                    <Shield className="w-3.5 h-3.5 text-amber-600" />
+                    <span>محادثة موجهة بين الزملاء المحددين • خاضعة للمتابعة والرقابة الإدارية للمدير والناظر ⚖️</span>
                   </span>
                 </div>
 

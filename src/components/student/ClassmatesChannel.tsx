@@ -330,10 +330,10 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
               <button
                 onClick={onOpenPrivateChat}
                 className="py-3 px-4 rounded-2xl bg-emerald-950/90 hover:bg-emerald-950 text-emerald-200 border border-emerald-400/40 font-bold text-xs sm:text-sm shadow-md transition-all flex items-center gap-2 active:scale-98"
-                title="محادثة مشفرة وسرية بينك وبين الزميل الذي تختاره فقط"
+                title="محادثة مباشرة مع زميل محدد • خاضعة للرقابة التربوية للمدير والناظر"
               >
-                <Lock className="w-4 h-4 text-emerald-400" />
-                <span>محادثة خاصة وسرية 🔒</span>
+                <MessageCircle className="w-4 h-4 text-emerald-400" />
+                <span>محادثة مباشرة مع زميل 💬</span>
               </button>
             )}
           </div>

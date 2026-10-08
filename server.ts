@@ -646,9 +646,19 @@ app.delete('/api/peer-exchanges/:id', (req, res) => {
   res.json({ success: true });
 });
 
-// 7. Private Student Conversations API (المحادثات الخاصة والسرية بين تلاميذ القسم)
+// 7. Student Peer Conversations API (المحادثات الموجهة بين تلاميذ القسم - تحت الرقابة التربوية للمدير والناظر)
 app.get('/api/conversations', (req, res) => {
-  const { studentId } = req.query;
+  const { studentId, role, classId } = req.query;
+
+  // الإدارة التربوية: السيد المدير والسيد الناظر يملكان صلاحية الرقابة الشاملة على كافة المحادثات
+  if (role === 'director' || role === 'censor') {
+    let allConvs = db.privateConversations || [];
+    if (classId && typeof classId === 'string' && classId !== 'ALL') {
+      allConvs = allConvs.filter(c => c.classId === classId);
+    }
+    return res.json(allConvs);
+  }
+
   if (!studentId || typeof studentId !== 'string') {
     return res.json([]);
   }
@@ -677,18 +687,27 @@ app.post('/api/conversations', (req, res) => {
 
 app.get('/api/conversations/:id/messages', (req, res) => {
   const { id } = req.params;
-  const { studentId } = req.query;
+  const { studentId, role } = req.query;
   const conv = (db.privateConversations || []).find(c => c.id === id);
 
-  // Privacy verification: Only authorized participants can fetch messages
-  if (conv && studentId && typeof studentId === 'string') {
+  // الرقابة الإدارية: السيد المدير والسيد الناظر لديهما حق الاطلاع والمتابعة التربوية
+  const isSupervisor = role === 'director' || role === 'censor';
+
+  if (conv && studentId && typeof studentId === 'string' && !isSupervisor) {
     if (!conv.participantIds.includes(studentId)) {
-      return res.status(403).json({ error: 'عذراً، هذه محادثة خاصة وسرية لا يمكن الاطلاع عليها إلا للمشاركين' });
+      return res.status(403).json({ error: 'عذراً، هذه المحادثة محصورة بين أطرافها وإدارة المؤسسة فقط' });
     }
   }
 
   const messages = (db.privateMessages || []).filter(m => m.conversationId === id);
   res.json(messages);
+});
+
+app.delete('/api/conversations/:id/messages/:msgId', (req, res) => {
+  const { msgId } = req.params;
+  db.privateMessages = (db.privateMessages || []).filter(m => m.id !== msgId);
+  saveDatabase(db);
+  res.json({ success: true });
 });
 
 app.post('/api/conversations/:id/messages', (req, res) => {

@@ -52,6 +52,7 @@ import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentCard } from '../common/DocumentCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { DatabaseDebugView } from './DatabaseDebugView';
+import { StudentChatSupervisionPanel } from '../common/StudentChatSupervisionPanel';
 import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface DirectorViewProps {
@@ -69,7 +70,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   summons,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'roster'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'roster' | 'chat-supervision'>('announcements');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [showDebugModal, setShowDebugModal] = useState(false);
 
@@ -453,6 +454,21 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
           >
             <Users className="w-4 h-4" />
             <span>دليل الطاقم التربوي والأقسام</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('chat-supervision')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'chat-supervision'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Shield className="w-4 h-4 text-teal-600" />
+            <span>مراقبة محادثات التلاميذ 🛡️</span>
+            <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
+              رقابة تربوية
+            </span>
           </button>
         </div>
 
@@ -1233,6 +1249,11 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Tab: Student Chat Supervision */}
+      {activeTab === 'chat-supervision' && (
+        <StudentChatSupervisionPanel currentUser={currentUser} />
       )}
 
       {/* Preview Modal */}
