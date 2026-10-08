@@ -271,7 +271,7 @@ export function normalizeArabic(text: string): string {
     .replace(/\s+/g, ' ');
 }
 
-// Strict student authentication against official roster
+// Strict dual authentication: Student MUST enter both 16-digit ID AND matching Surname & Name
 export function authenticateOfficialStudent(criteria: {
   identifier?: string;
   surname?: string;
@@ -280,72 +280,77 @@ export function authenticateOfficialStudent(criteria: {
   classId?: string;
 }): { success: boolean; user?: UserProfile; message?: string } {
   const cleanId = criteria.identifier?.trim().replace(/\s+/g, '') || '';
-
-  // 1. If 16-digit ID is entered, check exact match in official lists
-  if (cleanId) {
-    const idMatch = OFFICIAL_STUDENTS_LIST.find(s => s.identifier === cleanId);
-    if (idMatch) {
-      const user = toUserProfile(idMatch);
-      registerNewUser(user);
-      setCurrentUser(user);
-      return { success: true, user };
-    }
-  }
-
-  // 2. Search in official student roster by name
   const rawInput = [criteria.fullName, criteria.surname, criteria.firstName]
     .filter(Boolean)
     .join(' ')
     .trim();
   const normInput = normalizeArabic(rawInput);
 
+  // 1. Both 16-digit ID and Name are strictly required to prevent impersonation
+  if (!cleanId) {
+    return {
+      success: false,
+      message: '⛔ يرجى إدخال رقم التعريف المدرسي (16 رقماً) الخاص بك.',
+    };
+  }
+
   if (!normInput) {
     return {
       success: false,
-      message: 'يرجى إدخال رقم التعريف المدرسي أو الاسم واللقب للمتابعة.',
+      message: '⛔ يرجى إدخال اللقب والاسم الخاص بك للتأكد من هويتك ومنع دخول أي تلميذ آخر.',
     };
   }
 
-  const inputTokens = normInput.split(' ').filter(t => t.length > 0);
+  // 2. Find student by exact 16-digit Identifier in official roster or registered state
+  const officialMatch = OFFICIAL_STUDENTS_LIST.find(s => s.identifier === cleanId);
+  const registeredMatch = getAllUsers().find(u => u.role === 'student' && u.identifier === cleanId);
 
-  // A. Exact combined normalized match
-  let matchedStudent = OFFICIAL_STUDENTS_LIST.find(s => {
-    const sNormFull = normalizeArabic(`${s.surname} ${s.firstName}`);
-    return (
-      sNormFull === normInput ||
-      sNormFull.replace(/\s/g, '') === normInput.replace(/\s/g, '')
-    );
-  });
-
-  // B. Token-based matching: all tokens typed exist in the student's full name
-  if (!matchedStudent && inputTokens.length >= 2) {
-    const candidates = OFFICIAL_STUDENTS_LIST.filter(s => {
-      const sNormFull = normalizeArabic(`${s.surname} ${s.firstName}`);
-      return inputTokens.every(tok => sNormFull.includes(tok));
-    });
-    if (candidates.length === 1) {
-      matchedStudent = candidates[0];
-    } else if (candidates.length > 1 && criteria.classId) {
-      matchedStudent = candidates.find(c => c.classId === criteria.classId) || candidates[0];
-    }
-  }
-
-  // C. Substring matching if input is specific enough
-  if (!matchedStudent && normInput.length >= 5) {
-    matchedStudent = OFFICIAL_STUDENTS_LIST.find(s => {
-      const sNormFull = normalizeArabic(`${s.surname} ${s.firstName}`);
-      return sNormFull.includes(normInput) || normInput.includes(sNormFull);
-    });
-  }
-
-  if (!matchedStudent) {
+  if (!officialMatch && !registeredMatch) {
     return {
       success: false,
-      message: `⛔ عذراً، التلميذ (${rawInput}) غير مقيّد في القوائم الرسمية لمتوسطة الشهيد بن نعمة مصطفى. لا يُسمح بالدخول إلى المنصة إلا للتلاميذ المسجلين رسمياً في المؤسسة.`,
+      message: `⛔ رقم التعريف المدرسي (${cleanId}) غير مسجل في سجلات متوسطة الشهيد بن نعمة مصطفى. يرجى التأكد من الرقم المكون من 16 رقماً كما في الشهادة المدرسية أو كشف النقاط.`,
     };
   }
 
-  const user = toUserProfile(matchedStudent);
+  // 3. Verify that the entered Surname and First Name match this exact student
+  const expectedSurname = officialMatch ? officialMatch.surname : (registeredMatch?.name.split(' ')[0] || '');
+  const expectedFirstName = officialMatch ? officialMatch.firstName : (registeredMatch?.name.split(' ').slice(1).join(' ') || '');
+  const expectedFullName = officialMatch ? `${officialMatch.surname} ${officialMatch.firstName}` : registeredMatch!.name;
+
+  const normExpectedFull = normalizeArabic(expectedFullName);
+  const normExpectedSurname = normalizeArabic(expectedSurname);
+  const normExpectedFirst = normalizeArabic(expectedFirstName);
+
+  const normEnteredSurname = normalizeArabic(criteria.surname || '');
+  const normEnteredFirst = normalizeArabic(criteria.firstName || '');
+
+  // Matching check:
+  // - Direct full name match (or spaces ignored)
+  const isFullMatch = normInput === normExpectedFull || normInput.replace(/\s/g, '') === normExpectedFull.replace(/\s/g, '');
+  
+  // - Field-by-field match (even if order of names is swapped)
+  const isFieldMatch =
+    (normEnteredSurname === normExpectedSurname && normEnteredFirst === normExpectedFirst) ||
+    (normEnteredSurname === normExpectedFirst && normEnteredFirst === normExpectedSurname);
+
+  // - Substring token containment
+  const inputTokens = normInput.split(' ').filter(t => t.length > 0);
+  const expectedTokens = normExpectedFull.split(' ').filter(t => t.length > 0);
+  const isTokenMatch =
+    inputTokens.length >= 2 &&
+    inputTokens.every(tok => expectedTokens.some(et => et.includes(tok) || tok.includes(et)));
+
+  const isNameVerified = isFullMatch || isFieldMatch || isTokenMatch;
+
+  if (!isNameVerified) {
+    return {
+      success: false,
+      message: `⛔ عدم تطابق البيانات: اللقب والاسم المدخلان (${rawInput}) لا يتطابقان مع صاحب رقم التعريف المدرسي (${cleanId}). تم منع الدخول لحماية أمان وخصوصية الحساب.`,
+    };
+  }
+
+  // Verification passed - login student
+  const user = officialMatch ? toUserProfile(officialMatch) : registeredMatch!;
   registerNewUser(user);
   setCurrentUser(user);
   return { success: true, user };

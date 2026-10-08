@@ -259,7 +259,7 @@ export default function App() {
                 </div>
                 <h3 className="font-bold text-slate-900 text-lg mb-1">فضاء التلاميذ</h3>
                 <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                  تسجيل الدخول بالرقم المدرسي، اللقب والاسم الحقيقي، والقسم لتحميل الفروض والدروس.
+                  الدخول برقم التعريف المدرسي الخاص (16 رقماً) مع اللقب والاسم معاً لضمان أمان الحساب ومنع دخول أي زميل آخر.
                 </p>
                 <div className="text-xs font-bold text-emerald-700 flex items-center gap-1">
                   <span>دخول التلميذ</span>

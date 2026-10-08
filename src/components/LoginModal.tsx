@@ -66,7 +66,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
 
   if (!isOpen) return null;
 
-  // Student Login Submit Handler - Strictly allows only enrolled official students
+  // Student Login Submit Handler - Strictly enforces 16-digit ID + matching Name
   const handleStudentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
@@ -75,9 +75,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     const cleanFirstName = studentFirstName.trim();
     const cleanStudentId = studentId.trim().replace(/\s+/g, '');
 
-    // Allow login if 16-digit ID is provided OR name is provided
-    if (!cleanStudentId && !cleanSurname && !cleanFirstName) {
-      setError('يرجى إدخال رقم التعريف المدرسي أو الاسم واللقب للمتابعة.');
+    // Strictly enforce both credentials
+    if (!cleanStudentId) {
+      setError('يرجى إدخال رقم التعريف المدرسي المكون من 16 رقماً الخاص بك.');
+      return;
+    }
+
+    if (!cleanSurname || !cleanFirstName) {
+      setError('يرجى إدخال اللقب والاسم معاً لتأكيد هويتك ومنع دخول أي تلميذ آخر في حسابك.');
       return;
     }
 
@@ -96,22 +101,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
         onLoginSuccess(res.user);
         onClose();
       } else {
-        // Fallback: seamless direct student login with specified name and class
-        const matchedClass = SCHOOL_CLASSES.find(c => c.id === studentClassId);
-        const displayName = `${cleanSurname} ${cleanFirstName}`.trim() || `تلميذ قسم ${matchedClass?.name || '4 متوسط'}`;
-        const fallbackStudent: UserProfile = {
-          id: 'student-' + (cleanStudentId || Date.now()),
-          identifier: cleanStudentId || `10014${Date.now().toString().slice(-11)}`,
-          name: displayName,
-          role: 'student',
-          classId: studentClassId || '4AM-1',
-          className: matchedClass?.name || 'رابعة متوسط 01',
-          title: `تلميذ(ة) بقسم ${matchedClass?.name || 'رابعة متوسط 01'}`,
-        };
-        registerNewUser(fallbackStudent);
-        setCurrentUser(fallbackStudent);
-        onLoginSuccess(fallbackStudent);
-        onClose();
+        setError(res.message || 'بيانات الدخول غير صحيحة أو غير متطابقة مع سجلات المؤسسة.');
       }
     }, 250);
   };
@@ -394,9 +384,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
               <div className="bg-emerald-50/90 border border-emerald-200 p-3.5 rounded-2xl text-xs text-emerald-950 leading-relaxed shadow-xs">
                 <span className="font-bold flex items-center gap-1.5 mb-1 text-emerald-900">
                   <Shield className="w-4 h-4 text-emerald-700" />
-                  <span>حماية خصوصية وأمان حسابات التلاميذ:</span>
+                  <span>دخول آمن ومحمي لتلاميذ المؤسسة (الرقم المدرسي + اللقب والاسم):</span>
                 </span>
-                تم إخفاء قوائم الأسماء كلياً لمنع أي دخول غير مصرح به لحسابات الزملاء. للدخول، يرجى كتابة رقم تعريفك المدرسي الخاص (16 رقماً) أو اللقب والاسم والقسم المسجل به في المؤسسة.
+                لحماية حسابك ومنع أي تلميذ آخر من الدخول في حسابك، يُشترط النظام إدخال <strong>رقم تعريفك المدرسي (16 رقماً)</strong> مع <strong>اللقب والاسم</strong> وتطابقهما معاً كما في الشهادة المدرسية أو كشف النقاط.
               </div>
 
               <form onSubmit={handleStudentSubmit} className="space-y-3.5">
@@ -404,7 +394,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <div>
                   <div className="flex items-center justify-between mb-1">
                     <label className="text-xs font-bold text-slate-700">
-                      رقم التعريف المدرسي (16 رقماً):
+                      رقم التعريف المدرسي (16 رقماً): <span className="text-red-500 font-black">* إلزامي</span>
                     </label>
                     <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-300">
                       من الشهادة أو كشف النقاط
@@ -413,6 +403,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                   <div className="relative">
                     <input
                       type="text"
+                      required
                       placeholder="أدخل رقمك المدرسي المكون من 16 رقماً"
                       value={studentId}
                       onChange={e => setStudentId(e.target.value)}
@@ -422,7 +413,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     <UserCheck className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
                   </div>
                   <span className="text-[10px] text-slate-500 mt-1 block">
-                    يمكنك الدخول المباشر برقم التعريف المدرسي وحده، أو بكتابة اللقب والاسم أدناه.
+                    يضمن عدم تمكن أي زميل آخر من الدخول إلى حسابك.
                   </span>
                 </div>
 
@@ -448,10 +439,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <div className="grid grid-cols-2 gap-3">
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      اللقب:
+                      اللقب: <span className="text-red-500 font-black">* إلزامي</span>
                     </label>
                     <input
                       type="text"
+                      required
                       placeholder="لقب التلميذ(ة)"
                       value={studentSurname}
                       onChange={e => setStudentSurname(e.target.value)}
@@ -461,10 +453,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
 
                   <div>
                     <label className="block text-xs font-bold text-slate-700 mb-1">
-                      الاسم:
+                      الاسم: <span className="text-red-500 font-black">* إلزامي</span>
                     </label>
                     <input
                       type="text"
+                      required
                       placeholder="اسم التلميذ(ة)"
                       value={studentFirstName}
                       onChange={e => setStudentFirstName(e.target.value)}
