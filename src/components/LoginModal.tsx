@@ -483,61 +483,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </>
                   )}
                 </button>
-
-                {/* Quick Simulation Buttons for Testing Student Chat */}
-                <div className="pt-3 border-t border-slate-200 space-y-2">
-                  <p className="text-[11px] font-bold text-emerald-800 text-center flex items-center justify-center gap-1">
-                    <Sparkles className="w-3.5 h-3.5 text-emerald-600" />
-                    <span>تجربة ومحاكاة محادثة التلاميذ (زميلان في نفس القسم لاختبار المراسلة الفورية):</span>
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const s1: UserProfile = {
-                          id: 'student-1101414140032700',
-                          identifier: '1101414140032700',
-                          name: 'عدة عمار فاطمة هاجر',
-                          role: 'student',
-                          classId: '2AM-2',
-                          className: 'ثانية متوسط 02',
-                          title: 'تلميذ(ة) بقسم ثانية متوسط 02',
-                        };
-                        registerNewUser(s1);
-                        setCurrentUser(s1);
-                        onLoginSuccess(s1);
-                        onClose();
-                      }}
-                      className="py-2.5 px-3 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 text-xs font-bold border border-emerald-300 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <UserCheck className="w-3.5 h-3.5 text-emerald-700" />
-                      <span>دخول كتلميذة 1: عدة عمار فاطمة هاجر (2AM-2)</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const s2: UserProfile = {
-                          id: 'student-1101501160038700',
-                          identifier: '1101501160038700',
-                          name: 'رمضاوي فرح زوليخة',
-                          role: 'student',
-                          classId: '2AM-2',
-                          className: 'ثانية متوسط 02',
-                          title: 'تلميذ(ة) بقسم ثانية متوسط 02',
-                        };
-                        registerNewUser(s2);
-                        setCurrentUser(s2);
-                        onLoginSuccess(s2);
-                        onClose();
-                      }}
-                      className="py-2.5 px-3 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-900 text-xs font-bold border border-teal-300 flex items-center justify-center gap-1.5 cursor-pointer transition-colors"
-                    >
-                      <UserCheck className="w-3.5 h-3.5 text-teal-700" />
-                      <span>دخول كزميلتها 2: رمضاوي فرح زوليخة (2AM-2)</span>
-                    </button>
-                  </div>
-                </div>
               </form>
             </div>
           ) : (
@@ -593,7 +538,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       }}
                       className="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold hover:underline flex items-center gap-1"
                     >
-                      <KeyRound className="w-3 h-3" />
+                      <KeyRound className="w-3.5 h-3.5" />
                       <span>نسيت كلمة السر؟ تحديثها هنا</span>
                     </button>
                   </div>
@@ -649,56 +594,28 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                   </button>
                 </div>
 
-                {/* Staff Simulation Testing Buttons */}
-                <div className="pt-3 border-t border-slate-200 space-y-2">
-                  <p className="text-[11px] font-bold text-slate-500 text-center">
-                    👔 محاكاة وتجريب أدوار الطاقم الإداري والتربوي (المدير والأساتذة):
-                  </p>
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const demoDirector: UserProfile = {
-                          id: 'staff-1097448010036800',
-                          identifier: '1097448010036800',
-                          name: 'عدة عمار عبد القادر',
-                          role: 'director',
-                          title: 'مدير متوسطة الشهيد بن نعمة مصطفى',
-                        };
-                        registerNewUser(demoDirector);
-                        setCurrentUser(demoDirector);
-                        onLoginSuccess(demoDirector);
-                        onClose();
-                      }}
-                      className="py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                    >
-                      <Building className="w-4 h-4 text-purple-700" />
-                      <span>دخول تجريبي كمدير المتوسطة</span>
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => {
-                        const demoTeacher: UserProfile = {
-                          id: 'staff-1197348010089800',
-                          identifier: '1197348010089800',
-                          name: 'حمزة نفيسة',
-                          role: 'teacher',
-                          subjects: ['english'],
-                          title: 'أستاذة التعليم المتوسط - اللغة الإنجليزية',
-                          assignedClasses: ['4AM-1', '4AM-2', '3AM-1', '3AM-2', '2AM-1', '1AM-1'],
-                        };
-                        registerNewUser(demoTeacher);
-                        setCurrentUser(demoTeacher);
-                        onLoginSuccess(demoTeacher);
-                        onClose();
-                      }}
-                      className="py-2.5 px-3 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-900 text-xs font-bold border border-blue-200 flex items-center justify-center gap-2 cursor-pointer transition-colors"
-                    >
-                      <Sparkles className="w-4 h-4 text-blue-700" />
-                      <span>دخول تجريبي كأستاذة مادة</span>
-                    </button>
-                  </div>
+                {/* Director Quick Demo Login Button Only */}
+                <div className="pt-3 border-t border-slate-200">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const demoDirector: UserProfile = {
+                        id: 'staff-1097448010036800',
+                        identifier: '1097448010036800',
+                        name: 'عدة عمار عبد القادر',
+                        role: 'director',
+                        title: 'مدير متوسطة الشهيد بن نعمة مصطفى',
+                      };
+                      registerNewUser(demoDirector);
+                      setCurrentUser(demoDirector);
+                      onLoginSuccess(demoDirector);
+                      onClose();
+                    }}
+                    className="w-full py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm"
+                  >
+                    <Building className="w-4 h-4 text-purple-700" />
+                    <span>دخول تجريبي سريع كمدير المؤسسة</span>
+                  </button>
                 </div>
               </form>
             </div>
