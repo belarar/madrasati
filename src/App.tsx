@@ -30,6 +30,8 @@ import { MobileBottomNav } from './components/MobileBottomNav';
 import { Navbar } from './components/Navbar';
 import { DocumentCard } from './components/common/DocumentCard';
 import { DocumentPreviewModal } from './components/common/DocumentPreviewModal';
+import { NotificationToast } from './components/common/NotificationToast';
+import { NotificationsModal } from './components/common/NotificationsModal';
 import { PwaInstallModal } from './components/common/PwaInstallModal';
 import { CensorView } from './components/censor/CensorView';
 import { DirectorView } from './components/director/DirectorView';
@@ -40,12 +42,15 @@ import {
   getAnnouncements,
   getCurrentUser,
   getDocuments,
+  getNotifications,
   getSummons,
+  getUnreadNotificationsCount,
   initStorage,
   setCurrentUser,
   syncWithServer,
 } from './services/storageService';
 import {
+  AppNotification,
   ParentSummon,
   SchoolAnnouncement,
   SchoolDocument,
@@ -62,26 +67,45 @@ export default function App() {
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [copiedShare, setCopiedShare] = useState(false);
 
+  // Notifications & Document Preview State
+  const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
+  const [notifications, setNotifications] = useState<AppNotification[]>(() => getNotifications());
+  const [unreadNotifsCount, setUnreadNotifsCount] = useState<number>(0);
+  const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
+
   const refreshAllData = () => {
     setUser(getCurrentUser());
     setDocuments(getDocuments());
     setAnnouncements(getAnnouncements());
     setSummons(getSummons());
+    const notifs = getNotifications();
+    setNotifications(notifs);
+    setUnreadNotifsCount(getUnreadNotificationsCount(getCurrentUser()?.identifier));
   };
 
   useEffect(() => {
     initStorage();
     refreshAllData();
 
-    const handleAuthChange = () => setUser(getCurrentUser());
+    const handleAuthChange = () => {
+      const u = getCurrentUser();
+      setUser(u);
+      setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier));
+    };
     const handleDocsChange = () => setDocuments(getDocuments());
     const handleAnnsChange = () => setAnnouncements(getAnnouncements());
     const handleSummonsChange = () => setSummons(getSummons());
+    const handleNotifsChange = () => {
+      const notifs = getNotifications();
+      setNotifications(notifs);
+      setUnreadNotifsCount(getUnreadNotificationsCount(getCurrentUser()?.identifier));
+    };
 
     window.addEventListener('auth-change', handleAuthChange);
     window.addEventListener('documents-change', handleDocsChange);
     window.addEventListener('announcements-change', handleAnnsChange);
     window.addEventListener('summons-change', handleSummonsChange);
+    window.addEventListener('notifications-change', handleNotifsChange);
 
     const handleBeforeInstall = (e: any) => {
       e.preventDefault();
@@ -94,6 +118,7 @@ export default function App() {
       window.removeEventListener('documents-change', handleDocsChange);
       window.removeEventListener('announcements-change', handleAnnsChange);
       window.removeEventListener('summons-change', handleSummonsChange);
+      window.removeEventListener('notifications-change', handleNotifsChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
     };
   }, []);
@@ -332,6 +357,34 @@ export default function App() {
         currentUser={currentUser}
         onOpenSwitch={() => setLoginModalOpen(true)}
         onOpenPwaInstall={() => setPwaModalOpen(true)}
+        onOpenNotifications={() => setNotificationsModalOpen(true)}
+        unreadNotificationsCount={unreadNotifsCount}
+      />
+
+      {/* Real-time Notification Alert Toast (Audio Chime + Popup Banner) */}
+      <NotificationToast
+        onOpenDocument={doc => setPreviewDoc(doc)}
+        onOpenAllNotifications={() => setNotificationsModalOpen(true)}
+      />
+
+      {/* Direct Document Preview Modal */}
+      <DocumentPreviewModal
+        doc={previewDoc}
+        onClose={() => setPreviewDoc(null)}
+      />
+
+      {/* Notifications Center Modal */}
+      <NotificationsModal
+        isOpen={notificationsModalOpen}
+        onClose={() => setNotificationsModalOpen(false)}
+        notifications={notifications}
+        currentUser={currentUser}
+        onSelectNotification={notif => {
+          if (notif.type === 'document' && notif.sourceId) {
+            const d = documents.find(doc => doc.id === notif.sourceId);
+            if (d) setPreviewDoc(d);
+          }
+        }}
       />
 
       {/* Login / Switch Modal */}

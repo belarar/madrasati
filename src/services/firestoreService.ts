@@ -307,6 +307,21 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
     if (ann.fileDataUrl && typeof ann.fileDataUrl === 'string' && ann.fileDataUrl.length > 0) {
       saveFilePayloadToFirestore(ann.id, ann.fileDataUrl).catch(() => {});
     }
+
+    // Auto-create cloud notification for announcement
+    const notifId = 'notif-ann-' + Date.now();
+    const notifRef = doc(firestore, 'notifications', notifId);
+    await setDoc(notifRef, {
+      id: notifId,
+      type: 'announcement',
+      title: `إعلان رسمي جديد: ${ann.title}`,
+      message: (ann.content || '').slice(0, 160) + ((ann.content || '').length > 160 ? '...' : ''),
+      targetRole: ann.target || 'all',
+      sourceAuthorName: ann.authorName || 'إدارة المؤسسة',
+      sourceId: ann.id,
+      createdAt: new Date().toISOString(),
+      readBy: [],
+    });
   } catch (err) {
     console.warn(`[Firestore] Error saving announcement ${ann.id}:`, err);
   }

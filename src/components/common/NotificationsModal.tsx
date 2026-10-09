@@ -12,6 +12,7 @@ import {
   MessageCircle,
   Sparkles,
   Users,
+  Volume2,
   X,
 } from 'lucide-react';
 import { AppNotification, UserProfile } from '../../types';
@@ -19,6 +20,12 @@ import {
   markAllNotificationsAsRead,
   markNotificationAsRead,
 } from '../../services/storageService';
+import {
+  isNotificationSupported,
+  requestNotificationPermission,
+  playNotificationChime,
+  getNotificationPermission,
+} from '../../services/notificationService';
 
 interface NotificationsModalProps {
   isOpen: boolean;
@@ -36,8 +43,24 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
   onSelectNotification,
 }) => {
   const [filter, setFilter] = useState<'all' | 'document' | 'announcement' | 'peer'>('all');
+  const [permState, setPermState] = useState<string>(() => getNotificationPermission());
+  const [soundPlayed, setSoundPlayed] = useState(false);
 
   if (!isOpen) return null;
+
+  const handleTestSound = () => {
+    playNotificationChime();
+    setSoundPlayed(true);
+    setTimeout(() => setSoundPlayed(false), 2000);
+  };
+
+  const handleRequestPerm = async () => {
+    const res = await requestNotificationPermission();
+    setPermState(res);
+    if (res === 'granted') {
+      playNotificationChime();
+    }
+  };
 
   const userId = currentUser?.identifier || 'guest';
 
@@ -146,6 +169,49 @@ export const NotificationsModal: React.FC<NotificationsModalProps> = ({
           >
             <X className="w-5 h-5" />
           </button>
+        </div>
+
+        {/* Live Notification Audio & Web Push Controls Bar */}
+        <div className="bg-emerald-50 px-4 py-2 border-b border-emerald-100 flex flex-wrap items-center justify-between gap-2 text-xs">
+          <div className="flex items-center gap-1.5 text-emerald-900 font-semibold">
+            <Volume2 className="w-3.5 h-3.5 text-emerald-700" />
+            <span>نظام التنبيهات الصوتية: مفعّل</span>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={handleTestSound}
+              className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all flex items-center gap-1 ${
+                soundPlayed
+                  ? 'bg-emerald-700 text-white border-emerald-700'
+                  : 'bg-white text-emerald-800 border-emerald-200 hover:bg-emerald-100'
+              }`}
+            >
+              <Volume2 className="w-3 h-3" />
+              <span>{soundPlayed ? 'تم تشغيل الرنة!' : 'تجربة صوت التنبيه'}</span>
+            </button>
+
+            {isNotificationSupported() && (
+              <button
+                type="button"
+                onClick={handleRequestPerm}
+                disabled={permState === 'granted'}
+                className={`px-2.5 py-1 rounded-lg border text-[11px] font-bold transition-all flex items-center gap-1 ${
+                  permState === 'granted'
+                    ? 'bg-emerald-100 text-emerald-800 border-emerald-300 cursor-default'
+                    : 'bg-emerald-700 hover:bg-emerald-800 text-white border-emerald-800 shadow-2xs'
+                }`}
+              >
+                <Bell className="w-3 h-3" />
+                <span>
+                  {permState === 'granted'
+                    ? 'إشعارات المتصفح مفعلة ✓'
+                    : 'تفعيل إشعارات المتصفح'}
+                </span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Toolbar & Filter Tabs */}

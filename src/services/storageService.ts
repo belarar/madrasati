@@ -43,6 +43,7 @@ import {
   seedInitialFirestoreData,
 } from './firestoreService';
 import { getFileFromIndexedDb, saveFileToIndexedDb } from '../utils/fileStorageDb';
+import { triggerNotificationAlert } from './notificationService';
 
 export const STORAGE_KEYS = {
   CURRENT_USER: 'ben_naama_current_user',
@@ -195,8 +196,20 @@ export function initStorage(): void {
       },
       onNotifications: (liveNotifs) => {
         if (Array.isArray(liveNotifs)) {
+          const rawCurrent = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+          const currentNotifs: AppNotification[] = rawCurrent ? JSON.parse(rawCurrent) : [];
+          const currentIds = new Set(currentNotifs.map(n => n.id));
+          const brandNew = liveNotifs.filter(n => !currentIds.has(n.id));
+
           safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(liveNotifs));
           window.dispatchEvent(new Event('notifications-change'));
+
+          // Trigger audio & toast notification alert for any brand-new incoming items
+          if (brandNew.length > 0 && currentNotifs.length > 0) {
+            brandNew.forEach(n => {
+              triggerNotificationAlert(n);
+            });
+          }
         }
       },
     });
@@ -622,6 +635,22 @@ export function saveDocument(doc: Omit<SchoolDocument, 'id' | 'uploadDate' | 'do
     ).catch(() => {});
   }
 
+  // Auto-generate notification for target classes / students
+  const targetClassesStr = (newDoc.targetClasses || []).join('، ');
+  const docNotif: AppNotification = {
+    id: 'notif-doc-' + Date.now(),
+    type: 'document',
+    title: `وثيقة جديدة: ${newDoc.title}`,
+    message: `قام ${newDoc.authorName || 'الأستاذ'} بنشر وثيقة جديدة (${newDoc.subject || 'مادة'}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
+    targetRole: newDoc.targetAudience === 'teachers' ? 'teachers' : 'students',
+    targetClassId: (newDoc.targetClasses && newDoc.targetClasses[0] !== 'ALL') ? newDoc.targetClasses[0] : undefined,
+    sourceAuthorName: newDoc.authorName || 'الأستاذ',
+    sourceId: newDoc.id,
+    createdAt: new Date().toISOString(),
+    readBy: [],
+  };
+  addNotificationLocally(docNotif, true);
+
   // 1. Direct Cloud Database Save (Firebase Firestore)
   saveDocumentToFirestore(newDoc).catch(err => {
     console.warn('[Firestore] Cloud save document error:', err);
@@ -896,6 +925,20 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
       newAnn.fileSize || ''
     ).catch(() => {});
   }
+
+  // Auto-generate notification for announcement
+  const annNotif: AppNotification = {
+    id: 'notif-ann-' + Date.now(),
+    type: 'announcement',
+    title: `إعلان رسمي جديد: ${newAnn.title}`,
+    message: (newAnn.content || '').slice(0, 140) + ((newAnn.content || '').length > 140 ? '...' : ''),
+    targetRole: newAnn.target || 'all',
+    sourceAuthorName: newAnn.authorName || 'إدارة المؤسسة',
+    sourceId: newAnn.id,
+    createdAt: new Date().toISOString(),
+    readBy: [],
+  };
+  addNotificationLocally(annNotif, true);
 
   // 1. Direct Cloud Database Save (Firebase Firestore)
   saveAnnouncementToFirestore(newAnn).catch(err => {
@@ -1617,9 +1660,20 @@ export async function syncWithServer(): Promise<void> {
     }
     const notifsRes = await fetch(`/api/notifications?${query.toString()}`);
     if (notifsRes.ok) {
-      const serverNotifs = await notifsRes.json();
+      const serverNotifs: AppNotification[] = await notifsRes.json();
+      const rawCurrent = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
+      const currentNotifs: AppNotification[] = rawCurrent ? JSON.parse(rawCurrent) : [];
+      const currentIds = new Set(currentNotifs.map(n => n.id));
+      const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
+
       safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(serverNotifs));
       window.dispatchEvent(new Event('notifications-change'));
+
+      if (brandNew.length > 0 && currentNotifs.length > 0) {
+        brandNew.forEach(n => {
+          triggerNotificationAlert(n);
+        });
+      }
     }
 
     // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
@@ -1677,6 +1731,17 @@ export async function syncWithServer(): Promise<void> {
 }
 
 // ================= دوال إدارة التنبيهات (Notifications) =================
+
+export function addNotificationLocally(notif: AppNotification, shouldAlert: boolean = true): void {
+  const notifs = getNotifications();
+  if (notifs.some(n => n.id === notif.id)) return;
+  const updated = [notif, ...notifs];
+  safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('notifications-change'));
+  if (shouldAlert) {
+    triggerNotificationAlert(notif);
+  }
+}
 
 export function getNotifications(): AppNotification[] {
   try {

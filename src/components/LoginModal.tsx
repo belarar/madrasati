@@ -593,30 +593,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     <span>هل نسيت كلمة السر؟ انقر هنا لتحديث وتعيين كلمة سر جديدة فوراً</span>
                   </button>
                 </div>
-
-                {/* Director Quick Demo Login Button Only */}
-                <div className="pt-3 border-t border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      const demoDirector: UserProfile = {
-                        id: 'staff-1097448010036800',
-                        identifier: '1097448010036800',
-                        name: 'عدة عمار عبد القادر',
-                        role: 'director',
-                        title: 'مدير متوسطة الشهيد بن نعمة مصطفى',
-                      };
-                      registerNewUser(demoDirector);
-                      setCurrentUser(demoDirector);
-                      onLoginSuccess(demoDirector);
-                      onClose();
-                    }}
-                    className="w-full py-2.5 px-3 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-900 text-xs font-bold border border-purple-200 flex items-center justify-center gap-2 cursor-pointer transition-colors shadow-sm"
-                  >
-                    <Building className="w-4 h-4 text-purple-700" />
-                    <span>دخول تجريبي سريع كمدير المؤسسة</span>
-                  </button>
-                </div>
               </form>
             </div>
           )}
