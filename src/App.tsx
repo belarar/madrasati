@@ -256,7 +256,7 @@ export default function App() {
 
             {/* Role Gateways Cards */}
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-              {/* Director Card - Official ID 1097448010036800 */}
+              {/* Director Card */}
               <div
                 onClick={() => setLoginModalOpen(true)}
                 className="bg-white rounded-3xl border-2 border-purple-400 p-5 shadow-xs hover:shadow-md hover:border-purple-600 cursor-pointer transition-all group relative overflow-hidden"
@@ -266,7 +266,7 @@ export default function App() {
                 </div>
                 <h3 className="font-bold text-slate-900 text-lg mb-1">فضاء السيد المدير</h3>
                 <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                  الدخول بالرقم المهني (<span className="font-mono font-bold text-purple-900">1097448010036800</span>) وكلمة السر.
+                  الدخول بالرقم المهني الرسمي وكلمة السر الخاصة بإدارة المؤسسة.
                 </p>
                 <div className="text-xs font-bold text-purple-700 flex items-center gap-1">
                   <span>تسجيل الدخول كمدير</span>

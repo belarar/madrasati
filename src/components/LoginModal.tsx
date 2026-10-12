@@ -43,13 +43,13 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   const [studentId, setStudentId] = useState('');
 
   // Staff Form Fields: الرقم المهني + كلمة السر
-  const [staffId, setStaffId] = useState('1097448010036800');
+  const [staffId, setStaffId] = useState('');
   const [staffPin, setStaffPin] = useState('');
 
   // Password Reset by Email state
   const [isResetMode, setIsResetMode] = useState(false);
-  const [resetIdentifier, setResetIdentifier] = useState('1097448010036800');
-  const [resetEmail, setResetEmail] = useState('biomoleculaire7@gmail.com');
+  const [resetIdentifier, setResetIdentifier] = useState('');
+  const [resetEmail, setResetEmail] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
