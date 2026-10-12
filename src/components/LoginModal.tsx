@@ -175,9 +175,9 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/65 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
         {/* Header */}
-        <div className="bg-gradient-to-r from-emerald-800 via-teal-800 to-emerald-900 text-white p-5 flex items-center justify-between shrink-0 shadow-md">
+        <div className="bg-emerald-900 bg-linear-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white p-5 flex items-center justify-between shrink-0 shadow-md">
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/10 flex items-center justify-center border border-white/20 shadow-inner">
+            <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center border border-white/20 shadow-inner">
               <LogIn className="w-5 h-5 text-emerald-300" />
             </div>
             <div>
@@ -187,11 +187,17 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
               <p className="text-xs text-emerald-200">{SCHOOL_NAME}</p>
             </div>
           </div>
+          {/* Prominent High-Contrast Exit Button */}
           <button
             onClick={onClose}
-            className="text-white/80 hover:text-white p-1.5 rounded-full hover:bg-white/10 transition-colors"
+            type="button"
+            className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white/15 hover:bg-rose-600 text-white border border-white/30 hover:border-rose-400 transition-all shadow-xs cursor-pointer group"
+            title="خروج وإغلاق النافذة"
           >
-            <X className="w-6 h-6" />
+            <div className="w-5 h-5 rounded-lg bg-black/20 group-hover:bg-white/20 flex items-center justify-center">
+              <X className="w-4 h-4 text-white stroke-[2.5]" />
+            </div>
+            <span className="text-xs font-bold text-white">خروج</span>
           </button>
         </div>
 
@@ -204,13 +210,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 setActiveCategory('student');
                 setError(null);
               }}
-              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer ${
                 activeCategory === 'student'
-                  ? 'bg-emerald-700 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  ? 'bg-emerald-700 text-white shadow-xs font-black'
+                  : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/70 font-bold'
               }`}
             >
-              <GraduationCap className="w-4 h-4" />
+              <div
+                className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                  activeCategory === 'student'
+                    ? 'bg-emerald-900 text-white'
+                    : 'bg-slate-200 text-emerald-800'
+                }`}
+              >
+                <GraduationCap className="w-4 h-4 stroke-[2.5]" />
+              </div>
               <span>فضاء التلاميذ</span>
             </button>
 
@@ -220,13 +234,21 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 setActiveCategory('staff');
                 setError(null);
               }}
-              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer ${
                 activeCategory === 'staff'
-                  ? 'bg-emerald-700 text-white shadow-xs'
-                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+                  ? 'bg-emerald-700 text-white shadow-xs font-black'
+                  : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/70 font-bold'
               }`}
             >
-              <Building className="w-4 h-4" />
+              <div
+                className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
+                  activeCategory === 'staff'
+                    ? 'bg-emerald-900 text-white'
+                    : 'bg-slate-200 text-emerald-800'
+                }`}
+              >
+                <Building className="w-4 h-4 stroke-[2.5]" />
+              </div>
               <span>المدير، الأساتذة والإدارة</span>
             </button>
           </div>
@@ -332,17 +354,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer"
+                  className="w-full py-3.5 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-extrabold text-sm sm:text-base shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border border-emerald-600/50"
                 >
                   {loading ? (
                     <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>جارٍ التحقق والدخول...</span>
+                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="text-white font-bold">جارٍ التحقق والدخول إلى الفضاء...</span>
                     </>
                   ) : (
                     <>
-                      <LogIn className="w-4 h-4" />
-                      <span>دخول فضاء التلميذ الآن</span>
+                      <div className="w-8 h-8 rounded-xl bg-emerald-900/60 border border-emerald-400/40 flex items-center justify-center shrink-0 shadow-inner">
+                        <GraduationCap className="w-5 h-5 text-emerald-200 stroke-[2.5]" />
+                      </div>
+                      <span className="text-white font-black text-sm sm:text-base">دخول فضاء التلميذ الآن</span>
+                      <ArrowRight className="w-4 h-4 text-emerald-300 rtl:rotate-180" />
                     </>
                   )}
                 </button>
@@ -602,17 +627,20 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer"
+                  className="w-full py-3.5 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-extrabold text-sm sm:text-base shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border border-emerald-600/50"
                 >
                   {loading ? (
                     <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>جارٍ التحقق من بيانات الدخول...</span>
+                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="text-white font-bold">جارٍ التحقق من بيانات الدخول...</span>
                     </>
                   ) : (
                     <>
-                      <LogIn className="w-4 h-4" />
-                      <span>تسجيل الدخول</span>
+                      <div className="w-8 h-8 rounded-xl bg-emerald-900/60 border border-emerald-400/40 flex items-center justify-center shrink-0 shadow-inner">
+                        <LogIn className="w-5 h-5 text-emerald-200 stroke-[2.5]" />
+                      </div>
+                      <span className="text-white font-black text-sm sm:text-base">تسجيل الدخول إلى حسابي</span>
+                      <ArrowRight className="w-4 h-4 text-emerald-300 rtl:rotate-180" />
                     </>
                   )}
                 </button>

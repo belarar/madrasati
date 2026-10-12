@@ -286,9 +286,10 @@ export default function App() {
                 <p className="text-xs text-slate-500 leading-relaxed mb-3">
                   الدخول برقم التعريف المدرسي الخاص (16 رقماً) مع اللقب والاسم معاً لضمان أمان الحساب ومنع دخول أي زميل آخر.
                 </p>
-                <div className="text-xs font-bold text-emerald-700 flex items-center gap-1">
-                  <span>دخول التلميذ</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
+                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold group-hover:bg-emerald-800 transition-colors shadow-2xs">
+                  <GraduationCap className="w-4 h-4 text-emerald-200" />
+                  <span>دخول فضاء التلميذ الآن</span>
+                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
                 </div>
               </div>
 

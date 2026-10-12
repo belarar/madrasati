@@ -17,6 +17,7 @@ import {
   Info,
   Layers,
   Lock,
+  LogOut,
   MessageCircle,
   Search,
   Share2,
@@ -26,7 +27,12 @@ import {
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SUBJECTS } from '../../data/mockData';
-import { getPeerExchanges, getPrivateConversations, registerNewUser } from '../../services/storageService';
+import {
+  getPeerExchanges,
+  getPrivateConversations,
+  registerNewUser,
+  setCurrentUser,
+} from '../../services/storageService';
 import {
   ParentSummon,
   SchoolAnnouncement,
@@ -248,7 +254,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
               <span>رقم التعريف المدرسي: {currentUser.identifier}</span>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-wrap items-center gap-2.5">
               <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
                 مرحباً بك، {currentUser.name}
               </h1>
@@ -259,11 +265,25 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   setEditClassId(currentUser.classId || '4AM-1');
                   setIsEditingProfile(true);
                 }}
-                className="px-3 py-1 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold border border-white/25 transition-all flex items-center gap-1.5 shadow-2xs"
+                className="px-3 py-1.5 rounded-xl bg-white/20 hover:bg-white/30 text-white text-xs font-bold border border-white/25 transition-all flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 title="تعديل اسمك أو تغيير قسمك الدراسي"
               >
                 <Edit3 className="w-3.5 h-3.5" />
                 <span>تعديل اسمي وقسمي</span>
+              </button>
+
+              {/* Logout button directly in Student Space Header */}
+              <button
+                type="button"
+                onClick={() => {
+                  setCurrentUser(null);
+                  window.dispatchEvent(new Event('auth-change'));
+                }}
+                className="px-3.5 py-1.5 rounded-xl bg-rose-600/90 hover:bg-rose-700 text-white text-xs font-bold border border-rose-400/40 transition-all flex items-center gap-1.5 shadow-xs cursor-pointer active:scale-95"
+                title="تسجيل الخروج من فضاء التلميذ"
+              >
+                <LogOut className="w-3.5 h-3.5 text-white stroke-[2.5]" />
+                <span>تسجيل الخروج</span>
               </button>
             </div>
 
