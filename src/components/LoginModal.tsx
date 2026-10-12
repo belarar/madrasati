@@ -1,18 +1,27 @@
 import React, { useState } from 'react';
 import {
   AlertCircle,
+  ArrowRight,
   Building,
+  CheckCircle2,
+  Clock,
+  Eye,
+  EyeOff,
   GraduationCap,
+  KeyRound,
   Lock,
   LogIn,
   Shield,
+  ShieldAlert,
   UserCheck,
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SCHOOL_NAME } from '../data/mockData';
+import { OFFICIAL_STAFF_LIST } from '../data/officialStaff';
 import {
   authenticateOfficialStudent,
   authenticateUser,
+  submitPasswordResetRequest,
 } from '../services/storageService';
 import { UserProfile } from '../types';
 
@@ -34,6 +43,16 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   // Staff Form Fields: الرقم المهني + كلمة السر
   const [staffId, setStaffId] = useState('');
   const [staffPin, setStaffPin] = useState('');
+
+  // Password Reset Mode Fields (Staff requests reset -> Director must approve)
+  const [isResetMode, setIsResetMode] = useState(false);
+  const [resetStaffId, setResetStaffId] = useState('');
+  const [resetNewPin, setResetNewPin] = useState('');
+  const [resetConfirmPin, setResetConfirmPin] = useState('');
+  const [resetNote, setResetNote] = useState('');
+  const [showResetPin, setShowResetPin] = useState(false);
+  const [isSubmittingReset, setIsSubmittingReset] = useState(false);
+  const [resetFeedback, setResetFeedback] = useState<{ type: 'success' | 'error'; message: string } | null>(null);
 
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
@@ -112,6 +131,45 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
       }
     }, 250);
   };
+
+  // Staff Password Reset Submit Handler (Requests reset which requires director approval)
+  const handleResetSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setResetFeedback(null);
+
+    const cleanId = resetStaffId.trim();
+    if (!cleanId) {
+      setResetFeedback({ type: 'error', message: 'يرجى إدخال رقم التعريف المهني المكون من 16 رقماً.' });
+      return;
+    }
+
+    if (resetNewPin.trim().length < 4) {
+      setResetFeedback({ type: 'error', message: 'كلمة السر الجديدة يجب أن تتكون من 4 خانات على الأقل.' });
+      return;
+    }
+
+    if (resetNewPin.trim() !== resetConfirmPin.trim()) {
+      setResetFeedback({ type: 'error', message: 'كلمة السر غير متطابقة مع خانة التأكيد، يرجى كتابتها بدقة.' });
+      return;
+    }
+
+    setIsSubmittingReset(true);
+    const res = await submitPasswordResetRequest(cleanId, resetNewPin.trim(), resetNote.trim());
+    setIsSubmittingReset(false);
+
+    if (res.success) {
+      setResetFeedback({
+        type: 'success',
+        message: 'تم إرسال طلب إعادة تعيين كلمة السر بنجاح إلى السيد المدير!',
+      });
+    } else {
+      setResetFeedback({ type: 'error', message: res.message });
+    }
+  };
+
+  const detectedStaff = resetStaffId.trim()
+    ? OFFICIAL_STAFF_LIST.find(s => s.identifier === resetStaffId.trim())
+    : null;
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/65 backdrop-blur-xs animate-in fade-in duration-200">
@@ -290,6 +348,193 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 </button>
               </form>
             </div>
+          ) : isResetMode ? (
+            /* Staff Password Reset Request Mode - Strictly requires Director approval to activate */
+            <div className="space-y-4 animate-fadeIn">
+              <div className="bg-amber-50 border border-amber-200 p-4 rounded-2xl text-xs text-amber-900 leading-relaxed space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-amber-950 text-sm">
+                  <ShieldAlert className="w-4 h-4 text-amber-700" />
+                  <span>طلب إعادة تعيين وتفعيل كلمة السر:</span>
+                </div>
+                <p>
+                  لحماية حسابك ومنع أي اختراق، يمكنك إدخال كلمة سر جديدة لطلب تفعيلها، <strong className="underline text-amber-950 font-black">ولن تتمكن من الدخول حتى يقوم السيد المدير شخصياً بالموافقة على الطلب وتفعيله</strong> من لوحة التحكم الخاصة به.
+                </p>
+              </div>
+
+              {resetFeedback ? (
+                <div
+                  className={`p-4 rounded-2xl text-xs leading-relaxed space-y-3 ${
+                    resetFeedback.type === 'success'
+                      ? 'bg-emerald-50 border border-emerald-300 text-emerald-950'
+                      : 'bg-rose-50 border border-rose-300 text-rose-950'
+                  }`}
+                >
+                  <div className="flex items-start gap-2.5">
+                    {resetFeedback.type === 'success' ? (
+                      <CheckCircle2 className="w-5 h-5 text-emerald-700 shrink-0 mt-0.5" />
+                    ) : (
+                      <AlertCircle className="w-5 h-5 text-rose-700 shrink-0 mt-0.5" />
+                    )}
+                    <div className="space-y-2">
+                      <p className="font-bold text-sm">{resetFeedback.message}</p>
+                      {resetFeedback.type === 'success' && (
+                        <div className="bg-white/80 p-3 rounded-xl border border-emerald-200 space-y-1 text-slate-700">
+                          <div className="flex items-center gap-1.5 font-bold text-amber-800">
+                            <Clock className="w-4 h-4" />
+                            <span>حالة الحساب: معلق ومحمي في انتظار مصادقة السيد المدير</span>
+                          </div>
+                          <p>
+                            لن يتم تفعيل الدخول بكلمة السر الجديدة إلا بعد أن يوافق السيد المدير على طلبك رسمياً. يرجى مراجعة الإدارة لتفعيل الدخول.
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsResetMode(false);
+                        setResetFeedback(null);
+                      }}
+                      className="w-full py-2.5 px-4 rounded-xl bg-slate-800 hover:bg-slate-900 text-white font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <ArrowRight className="w-3.5 h-3.5" />
+                      <span>العودة لصفحة تسجيل الدخول</span>
+                    </button>
+                    {resetFeedback.type === 'error' && (
+                      <button
+                        type="button"
+                        onClick={() => setResetFeedback(null)}
+                        className="py-2.5 px-4 rounded-xl bg-rose-200 hover:bg-rose-300 text-rose-900 font-bold text-xs transition-all cursor-pointer"
+                      >
+                        إعادة المحاولة
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <form onSubmit={handleResetSubmit} className="space-y-3.5">
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      رقم التعريف المهني (16 رقماً): <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type="text"
+                        required
+                        placeholder="أدخل رقمك المهني المكون من 16 رقماً"
+                        value={resetStaffId}
+                        onChange={e => setResetStaffId(e.target.value)}
+                        className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
+                        dir="ltr"
+                      />
+                      <UserCheck className="w-5 h-5 text-slate-400 absolute right-3 top-3" />
+                    </div>
+
+                    {detectedStaff && (
+                      <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-xl flex items-center gap-2 text-xs text-emerald-800 font-bold animate-fadeIn">
+                        <CheckCircle2 className="w-4 h-4 text-emerald-600 shrink-0" />
+                        <span>
+                          موظف رسمي: {detectedStaff.surname} {detectedStaff.firstName} ({detectedStaff.rank} {detectedStaff.subjectName ? `- ${detectedStaff.subjectName}` : ''})
+                        </span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      كلمة السر الجديدة المطلوبة (4 خانات فما فوق): <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showResetPin ? 'text' : 'password'}
+                        required
+                        minLength={4}
+                        placeholder="اختر كلمة سر جديدة لحسابك"
+                        value={resetNewPin}
+                        onChange={e => setResetNewPin(e.target.value)}
+                        className="w-full pl-10 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono tracking-wider"
+                        dir="ltr"
+                      />
+                      <Lock className="w-5 h-5 text-slate-400 absolute right-3 top-3" />
+                      <button
+                        type="button"
+                        onClick={() => setShowResetPin(!showResetPin)}
+                        className="absolute left-3 top-3 text-slate-400 hover:text-slate-600 cursor-pointer"
+                        title={showResetPin ? 'إخفاء' : 'إظهار'}
+                      >
+                        {showResetPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                      </button>
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      تأكيد كلمة السر الجديدة: <span className="text-red-500">*</span>
+                    </label>
+                    <div className="relative">
+                      <input
+                        type={showResetPin ? 'text' : 'password'}
+                        required
+                        minLength={4}
+                        placeholder="أعد إدخال كلمة السر للتأكيد"
+                        value={resetConfirmPin}
+                        onChange={e => setResetConfirmPin(e.target.value)}
+                        className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono tracking-wider"
+                        dir="ltr"
+                      />
+                      <Lock className="w-5 h-5 text-slate-400 absolute right-3 top-3" />
+                    </div>
+                  </div>
+
+                  <div>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">
+                      ملاحظة أو سبب الطلب للإدارة (اختياري):
+                    </label>
+                    <input
+                      type="text"
+                      placeholder="مثال: نسيت كلمة السر القديمة / أرجو تفعيل حسابي"
+                      value={resetNote}
+                      onChange={e => setResetNote(e.target.value)}
+                      className="w-full px-3.5 py-2 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-xs outline-none"
+                    />
+                  </div>
+
+                  <div className="pt-2 space-y-2">
+                    <button
+                      type="submit"
+                      disabled={isSubmittingReset}
+                      className="w-full py-3 px-4 rounded-xl bg-amber-600 hover:bg-amber-700 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+                    >
+                      {isSubmittingReset ? (
+                        <>
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span>جارٍ إرسال الطلب للمدير...</span>
+                        </>
+                      ) : (
+                        <>
+                          <KeyRound className="w-4 h-4" />
+                          <span>إرسال طلب التفعيل إلى السيد المدير</span>
+                        </>
+                      )}
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsResetMode(false);
+                        setResetFeedback(null);
+                      }}
+                      className="w-full py-2 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <span>إلغاء والعودة لتسجيل الدخول</span>
+                    </button>
+                  </div>
+                </form>
+              )}
+            </div>
           ) : (
             /* Staff & Director Entrance: Professional ID + Password */
             <div className="space-y-4">
@@ -321,9 +566,24 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 </div>
 
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    كلمة السر: <span className="text-red-500">*</span>
-                  </label>
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="block text-xs font-bold text-slate-700">
+                      كلمة السر: <span className="text-red-500">*</span>
+                    </label>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setIsResetMode(true);
+                        setResetStaffId(staffId.trim());
+                        setResetFeedback(null);
+                        setError(null);
+                      }}
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:underline flex items-center gap-1 cursor-pointer"
+                    >
+                      <KeyRound className="w-3.5 h-3.5" />
+                      <span>نسيت كلمة السر؟ طلب تعيين وتفعيل</span>
+                    </button>
+                  </div>
                   <div className="relative">
                     <input
                       type="password"
@@ -360,8 +620,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <div className="mt-4 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 leading-relaxed flex items-start gap-2.5">
                   <Shield className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
                   <div>
-                    <span className="font-bold text-slate-800 block mb-0.5">حماية وأمان الحسابات:</span>
-                    لحماية الحسابات من أي محاولة دخول غير مصرح بها، تم حظر أي استرجاع مباشر من الواجهة العامة. في حالة نسيان كلمة السر، يُرجى مراجعة إدارة المؤسسة أو السيد المدير شخصياً لإعادة ضبطها.
+                    <span className="font-bold text-slate-800 block mb-0.5">بروتوكول حماية الحسابات من الاختراق:</span>
+                    في حالة نسيان كلمة السر، يمكنك تقديم طلب تعيين كلمة سر جديدة. لحماية حسابك، لن يتمكن أي شخص من الدخول حتى يوافق السيد المدير شخصياً على الطلب ويفعّله من لوحة التحكم.
                   </div>
                 </div>
               </form>

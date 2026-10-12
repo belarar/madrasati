@@ -44,6 +44,19 @@ export interface SchoolDatabase {
   privateMessages: any[];
   notifications: AppNotification[];
   userCustomPins: Record<string, string>; // identifier -> custom password
+  passwordResetRequests: PasswordResetRequest[];
+}
+
+export interface PasswordResetRequest {
+  id: string;
+  identifier: string;
+  staffName: string;
+  staffRank: string;
+  requestedPin: string;
+  requestDate: string;
+  note?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolvedAt?: string;
 }
 
 function loadDatabase(): SchoolDatabase {
@@ -57,6 +70,8 @@ function loadDatabase(): SchoolDatabase {
       if (parsed && Array.isArray(parsed.documents)) {
         if (!Array.isArray(parsed.privateConversations)) parsed.privateConversations = [];
         if (!Array.isArray(parsed.privateMessages)) parsed.privateMessages = [];
+        if (!parsed.userCustomPins) parsed.userCustomPins = {};
+        if (!Array.isArray(parsed.passwordResetRequests)) parsed.passwordResetRequests = [];
 
         // Seed initial sample conversation between two 2AM-2 classmates if empty
         if (parsed.privateConversations.length === 0) {
@@ -178,6 +193,7 @@ function loadDatabase(): SchoolDatabase {
       },
     ],
     userCustomPins: {},
+    passwordResetRequests: [],
   };
 
   saveDatabase(initialDb);
@@ -892,6 +908,105 @@ app.post('/api/users/update-password', (req, res) => {
   db.userCustomPins[identifier.toLowerCase()] = pin.trim();
   saveDatabase(db);
   res.json({ success: true, identifier: identifier.toLowerCase() });
+});
+
+// 9. Password Reset Requests API (Staff requests reset -> Director must approve & activate)
+app.get('/api/password-reset-requests', (req, res) => {
+  if (!Array.isArray(db.passwordResetRequests)) {
+    db.passwordResetRequests = [];
+  }
+  res.json(db.passwordResetRequests);
+});
+
+app.post('/api/password-reset-requests', (req, res) => {
+  const { identifier, staffName, staffRank, requestedPin, note } = req.body;
+  if (!identifier || !requestedPin || requestedPin.trim().length < 4) {
+    return res.status(400).json({ error: 'الرقم المهني وكلمة السر (4 خانات على الأقل) مطلوبان.' });
+  }
+
+  if (!Array.isArray(db.passwordResetRequests)) {
+    db.passwordResetRequests = [];
+  }
+
+  const cleanId = identifier.trim().toLowerCase();
+  const existingPendingIdx = db.passwordResetRequests.findIndex(
+    r => r.identifier.toLowerCase() === cleanId && r.status === 'pending'
+  );
+
+  const requestItem: PasswordResetRequest = {
+    id: `reset-req-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    identifier: identifier.trim(),
+    staffName: staffName ? staffName.trim() : 'أستاذ / موظف',
+    staffRank: staffRank ? staffRank.trim() : 'طاقم تربوي',
+    requestedPin: requestedPin.trim(),
+    requestDate: new Date().toISOString(),
+    note: note ? note.trim() : 'طلب استرجاع وتعيين كلمة سر جديدة',
+    status: 'pending',
+  };
+
+  if (existingPendingIdx >= 0) {
+    // Update existing pending request
+    db.passwordResetRequests[existingPendingIdx] = {
+      ...db.passwordResetRequests[existingPendingIdx],
+      ...requestItem,
+      id: db.passwordResetRequests[existingPendingIdx].id,
+    };
+  } else {
+    db.passwordResetRequests.unshift(requestItem);
+  }
+
+  saveDatabase(db);
+  res.json({ success: true, request: requestItem });
+});
+
+app.post('/api/password-reset-requests/:id/approve', (req, res) => {
+  const { id } = req.params;
+  if (!Array.isArray(db.passwordResetRequests)) {
+    db.passwordResetRequests = [];
+  }
+
+  const target = db.passwordResetRequests.find(r => r.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'لم يتم العثور على هذا الطلب.' });
+  }
+
+  target.status = 'approved';
+  target.resolvedAt = new Date().toISOString();
+
+  // Apply new PIN immediately to userCustomPins
+  db.userCustomPins[target.identifier.toLowerCase()] = target.requestedPin.trim();
+  saveDatabase(db);
+
+  res.json({ success: true, identifier: target.identifier, pin: target.requestedPin });
+});
+
+app.post('/api/password-reset-requests/:id/reject', (req, res) => {
+  const { id } = req.params;
+  if (!Array.isArray(db.passwordResetRequests)) {
+    db.passwordResetRequests = [];
+  }
+
+  const target = db.passwordResetRequests.find(r => r.id === id);
+  if (!target) {
+    return res.status(404).json({ error: 'لم يتم العثور على هذا الطلب.' });
+  }
+
+  target.status = 'rejected';
+  target.resolvedAt = new Date().toISOString();
+  saveDatabase(db);
+
+  res.json({ success: true });
+});
+
+app.delete('/api/password-reset-requests/:id', (req, res) => {
+  const { id } = req.params;
+  if (!Array.isArray(db.passwordResetRequests)) {
+    db.passwordResetRequests = [];
+  }
+
+  db.passwordResetRequests = db.passwordResetRequests.filter(r => r.id !== id);
+  saveDatabase(db);
+  res.json({ success: true });
 });
 
 // ================= SPA & VITE DEV SERVER MOUNTING =================

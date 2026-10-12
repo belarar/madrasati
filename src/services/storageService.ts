@@ -55,6 +55,7 @@ export const STORAGE_KEYS = {
   NOTIFICATIONS: 'ben_naama_notifications',
   PRIVATE_CONVERSATIONS: 'ben_naama_private_conversations',
   PRIVATE_MESSAGES: 'ben_naama_private_messages',
+  PASSWORD_RESET_REQUESTS: 'ben_naama_password_reset_requests',
 };
 
 const CLEAN_VERSION_KEY = 'ben_naama_strict_official_v16';
@@ -497,12 +498,31 @@ export function authenticateUser(identifier: string, pin?: string): {
     }
 
     // If staff user already has a configured password in storage
+    const pendingReq = getPasswordResetRequests().find(
+      r => r.identifier.toLowerCase() === cleanId && r.status === 'pending'
+    );
+
+    if (pendingReq && enteredPin === pendingReq.requestedPin) {
+      return {
+        success: false,
+        message:
+          '⏳ طلب إعادة تعيين كلمة السر قيد المراجعة: لقد تم تسجيل طلبك لاختيار كلمة سر جديدة بنجاح، لكن الحساب بانتظار موافقة وتفعيل السيد المدير شخصياً لحماية حسابك من الاختراق. يُرجى التواصل مع إدارة المؤسسة لتفعيل حسابك.',
+      };
+    }
+
     if (staffUser.pin) {
       if (enteredPin !== staffUser.pin) {
+        if (pendingReq) {
+          return {
+            success: false,
+            message:
+              '⚠️ تنبيه أمان: يوجد طلب إعادة تعيين كلمة سر معلق لهذا الحساب وبانتظار موافقة وتفعيل السيد المدير. لن يتم تفعيل الدخول حتى يصادق المدير على طلبك.',
+          };
+        }
         return {
           success: false,
           message:
-            '⛔ كلمة السر غير صحيحة. يرجى التأكد من كتابة كلمة السر بدقة. في حالة تعذر الدخول، يُرجى مراجعة إدارة المؤسسة.',
+            '⛔ كلمة السر غير صحيحة. يرجى التأكد من كتابة كلمة السر بدقة، أو الضغط على "طلب إعادة تعيين كلمة السر" أسفل الشاشة لطلب تفعيلها من المدير.',
         };
       }
     } else {
@@ -1365,6 +1385,263 @@ export function updateCurrentUserPassword(newPass: string): { success: boolean; 
   }
 
   return directResetPassword(current.identifier, current.email || '', cleanPass);
+}
+
+// ================= إدارة حسابات وكلمات سر الطاقم المهني (42 موظفاً) =================
+
+export interface StaffAccountItem {
+  identifier: string;
+  surname: string;
+  firstName: string;
+  fullName: string;
+  rank: string;
+  subjectName?: string;
+  role: UserRole;
+  pin?: string;
+  hasCustomPin: boolean;
+  email?: string;
+  birthDate?: string;
+}
+
+export function getOfficialStaffAccountList(): StaffAccountItem[] {
+  const users = getAllUsers();
+  return OFFICIAL_STAFF_LIST.map(member => {
+    const userMatch = users.find(u => u.identifier.toLowerCase() === member.identifier.toLowerCase());
+    const pin = (userMatch && userMatch.pin) ? userMatch.pin : member.pin;
+    return {
+      identifier: member.identifier,
+      surname: member.surname,
+      firstName: member.firstName,
+      fullName: `${member.surname} ${member.firstName}`,
+      rank: member.rank,
+      subjectName: member.subjectName,
+      role: member.role,
+      pin: pin || undefined,
+      hasCustomPin: Boolean(pin && pin.trim().length >= 4),
+      email: userMatch?.email || member.email,
+      birthDate: member.birthDate,
+    };
+  });
+}
+
+export function setStaffMemberPassword(identifier: string, newPin: string): { success: boolean; message: string; pin?: string } {
+  const cleanId = identifier.trim();
+  const cleanPin = newPin.trim();
+  if (cleanPin.length < 4) {
+    return { success: false, message: 'كلمة السر يجب أن تتكون من 4 خانات على الأقل.' };
+  }
+
+  const users = getAllUsers();
+  const existingIdx = users.findIndex(u => u.identifier.toLowerCase() === cleanId.toLowerCase());
+  const officialMatch = OFFICIAL_STAFF_LIST.find(s => s.identifier.toLowerCase() === cleanId.toLowerCase());
+
+  let targetUser: UserProfile;
+  if (existingIdx >= 0) {
+    targetUser = { ...users[existingIdx], pin: cleanPin };
+  } else if (officialMatch) {
+    targetUser = { ...toStaffUserProfile(officialMatch), pin: cleanPin };
+  } else {
+    return { success: false, message: 'لم يتم العثور على الموظف في السجلات.' };
+  }
+
+  const updatedUsers = existingIdx >= 0
+    ? users.map((u, i) => (i === existingIdx ? targetUser : u))
+    : [targetUser, ...users];
+
+  safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+  window.dispatchEvent(new Event('auth-change'));
+
+  // Sync to backend immediately
+  fetch('/api/users/update-password', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier: cleanId, pin: cleanPin }),
+  }).catch(() => {});
+
+  return {
+    success: true,
+    message: `تم تعيين وتحديث كلمة السر بنجاح للأستاذ/الموظف (${targetUser.name})!`,
+    pin: cleanPin,
+  };
+}
+
+// ================= نظام طلبات استرجاع وتفعيل كلمات السر المعلقة (حماية تامة من الاختراق) =================
+
+export interface PasswordResetRequest {
+  id: string;
+  identifier: string;
+  staffName: string;
+  staffRank: string;
+  requestedPin: string;
+  requestDate: string;
+  note?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolvedAt?: string;
+}
+
+export function getPasswordResetRequests(): PasswordResetRequest[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function fetchPasswordResetRequestsFromServer(): Promise<PasswordResetRequest[]> {
+  try {
+    const res = await fetch('/api/password-reset-requests');
+    if (res.ok) {
+      const serverList = await res.json();
+      if (Array.isArray(serverList)) {
+        safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(serverList));
+        window.dispatchEvent(new CustomEvent('password-requests-updated'));
+        return serverList;
+      }
+    }
+  } catch {}
+  return getPasswordResetRequests();
+}
+
+export async function submitPasswordResetRequest(
+  identifier: string,
+  requestedPin: string,
+  note?: string
+): Promise<{ success: boolean; message: string; request?: PasswordResetRequest }> {
+  const cleanId = identifier.trim();
+  const cleanPin = requestedPin.trim();
+
+  if (!cleanId) {
+    return { success: false, message: 'يرجى إدخال رقم التعريف المهني المكون من 16 رقماً.' };
+  }
+  if (cleanPin.length < 4) {
+    return { success: false, message: 'كلمة السر الجديدة يجب أن تتكون من 4 خانات على الأقل.' };
+  }
+
+  // Verify staff exists in official roster or existing users
+  const officialStaff = OFFICIAL_STAFF_LIST.find(
+    s => s.identifier.toLowerCase() === cleanId.toLowerCase()
+  );
+  const users = getAllUsers();
+  const existingUser = users.find(u => u.identifier.toLowerCase() === cleanId.toLowerCase());
+
+  if (!officialStaff && !existingUser) {
+    return {
+      success: false,
+      message: '⛔ لم يتم العثور على موظف بهذا الرقم المهني في السجلات الرسمية لمؤسسة الشهيد بن نعمة مصطفى.',
+    };
+  }
+
+  const staffName = officialStaff
+    ? `${officialStaff.surname} ${officialStaff.firstName}`
+    : existingUser?.name || 'أستاذ / موظف';
+  const staffRank = officialStaff?.rank || existingUser?.title || 'طاقم تربوي';
+
+  const newRequest: PasswordResetRequest = {
+    id: `reset-req-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    identifier: cleanId,
+    staffName,
+    staffRank,
+    requestedPin: cleanPin,
+    requestDate: new Date().toISOString(),
+    note: note ? note.trim() : 'طلب استرجاع وتعيين كلمة سر جديدة',
+    status: 'pending',
+  };
+
+  // Save to local storage
+  const currentRequests = getPasswordResetRequests().filter(
+    r => !(r.identifier.toLowerCase() === cleanId.toLowerCase() && r.status === 'pending')
+  );
+  currentRequests.unshift(newRequest);
+  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
+  window.dispatchEvent(new CustomEvent('password-requests-updated'));
+
+  // Sync to server backend
+  try {
+    await fetch('/api/password-reset-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(newRequest),
+    });
+  } catch {}
+
+  return {
+    success: true,
+    message: 'تم تسجيل طلبك بنجاح! الحساب في حالة انتظار ومصادقة من طرف السيد المدير شخصياً.',
+    request: newRequest,
+  };
+}
+
+export async function approvePasswordResetRequest(
+  requestId: string
+): Promise<{ success: boolean; message: string }> {
+  const currentRequests = getPasswordResetRequests();
+  const target = currentRequests.find(r => r.id === requestId);
+  if (!target) {
+    return { success: false, message: 'لم يتم العثور على هذا الطلب.' };
+  }
+
+  target.status = 'approved';
+  target.resolvedAt = new Date().toISOString();
+  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
+
+  // Directly set the new password in storage and sync to server
+  setStaffMemberPassword(target.identifier, target.requestedPin);
+
+  // Sync approval to server
+  try {
+    await fetch(`/api/password-reset-requests/${requestId}/approve`, { method: 'POST' });
+  } catch {}
+
+  window.dispatchEvent(new CustomEvent('password-requests-updated'));
+  return {
+    success: true,
+    message: `تمت الموافقة وتفعيل كلمة السر بنجاح للموظف (${target.staffName})! يمكنه الآن تسجيل الدخول مباشرة بكلمة السر الجديدة.`,
+  };
+}
+
+export async function rejectPasswordResetRequest(
+  requestId: string
+): Promise<{ success: boolean; message: string }> {
+  const currentRequests = getPasswordResetRequests();
+  const target = currentRequests.find(r => r.id === requestId);
+  if (!target) {
+    return { success: false, message: 'لم يتم العثور على هذا الطلب.' };
+  }
+
+  target.status = 'rejected';
+  target.resolvedAt = new Date().toISOString();
+  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
+
+  try {
+    await fetch(`/api/password-reset-requests/${requestId}/reject`, { method: 'POST' });
+  } catch {}
+
+  window.dispatchEvent(new CustomEvent('password-requests-updated'));
+  return {
+    success: true,
+    message: `تم رفض الطلب بنجاح والإبقاء على كلمة السر السابقة لحماية الحساب من أي اختراق أو تعديل غير مصرح.`,
+  };
+}
+
+export async function deletePasswordResetRequest(
+  requestId: string
+): Promise<{ success: boolean; message: string }> {
+  const currentRequests = getPasswordResetRequests().filter(r => r.id !== requestId);
+  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
+
+  try {
+    await fetch(`/api/password-reset-requests/${requestId}`, { method: 'DELETE' });
+  } catch {}
+
+  window.dispatchEvent(new CustomEvent('password-requests-updated'));
+  return { success: true, message: 'تم حذف الطلب من السجل بنجاح.' };
+}
+
+export function getPendingResetRequestsCount(): number {
+  return getPasswordResetRequests().filter(r => r.status === 'pending').length;
 }
 
 // ================= قناة التضامن والتبادل بين تلاميذ القسم =================

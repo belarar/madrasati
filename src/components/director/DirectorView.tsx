@@ -15,11 +15,13 @@ import {
   FileUp,
   FolderOpen,
   GraduationCap,
+  KeyRound,
   Megaphone,
   Paperclip,
   Plus,
   Send,
   Shield,
+  ShieldAlert,
   Trash2,
   Upload,
   UserCheck,
@@ -31,6 +33,8 @@ import {
   deleteAnnouncement,
   deleteDocument,
   getAllUsers,
+  getPendingResetRequestsCount,
+  fetchPasswordResetRequestsFromServer,
   registerNewUser,
   saveAnnouncement,
   saveDocument,
@@ -53,6 +57,7 @@ import { DocumentCard } from '../common/DocumentCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { DatabaseDebugView } from './DatabaseDebugView';
 import { StudentChatSupervisionPanel } from '../common/StudentChatSupervisionPanel';
+import { StaffAccountsManager } from './StaffAccountsManager';
 import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface DirectorViewProps {
@@ -70,7 +75,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   summons,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'roster' | 'chat-supervision'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'staff-accounts' | 'roster' | 'chat-supervision'>('announcements');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [showDebugModal, setShowDebugModal] = useState(false);
 
@@ -112,6 +117,22 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
   // Target Filter for Announcements List
   const [filterTarget, setFilterTarget] = useState<AnnouncementTarget | 'ALL'>('ALL');
+
+  // Pending password reset requests counter (Requiring director approval)
+  const [pendingResetCount, setPendingResetCount] = useState<number>(() => getPendingResetRequestsCount());
+
+  React.useEffect(() => {
+    fetchPasswordResetRequestsFromServer().then(() => {
+      setPendingResetCount(getPendingResetRequestsCount());
+    });
+
+    const handleReqUpdate = () => {
+      setPendingResetCount(getPendingResetRequestsCount());
+    };
+
+    window.addEventListener('password-requests-updated', handleReqUpdate);
+    return () => window.removeEventListener('password-requests-updated', handleReqUpdate);
+  }, []);
 
   const filteredAnnouncements = announcements.filter(a => {
     if (filterTarget === 'ALL') return true;
@@ -393,6 +414,39 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
         </div>
       </div>
 
+      {/* Security Alert: Pending Password Reset Requests */}
+      {pendingResetCount > 0 && (
+        <div className="bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-amber-500/10 border-2 border-rose-300 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-fadeIn">
+          <div className="flex items-center gap-3">
+            <span className="p-3 rounded-2xl bg-rose-600 text-white shadow-md animate-bounce">
+              <ShieldAlert className="w-6 h-6" />
+            </span>
+            <div>
+              <div className="flex items-center gap-2">
+                <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                  تنبيه أمان ومصادقة عاجل: يوجد {pendingResetCount} طلب استرجاع كلمة سر بانتظار موافقتك!
+                </h4>
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-rose-600 text-white animate-pulse">
+                  مطلوب الإجراء
+                </span>
+              </div>
+              <p className="text-xs text-slate-600 mt-0.5 leading-relaxed">
+                لحماية حسابات الأساتذة والموظفين من الاختراق، لن يتمكن أصحاب الطلبات من الدخول حتى تقوم شخصياً بالمصادقة على طلباتهم وتفعيلها من لوحة التحكم.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => setActiveTab('staff-accounts')}
+            className="px-5 py-2.5 rounded-xl bg-rose-600 hover:bg-rose-700 text-white text-xs sm:text-sm font-black transition-all shadow-md shrink-0 flex items-center justify-center gap-2 cursor-pointer"
+          >
+            <KeyRound className="w-4 h-4" />
+            <span>فتح لوحة المصادقة والتفعيل الآن</span>
+          </button>
+        </div>
+      )}
+
       {/* Tabs */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
@@ -442,6 +496,28 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
           >
             <FileUp className="w-4 h-4" />
             <span>تحميل ونشر وثيقة إدارية</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('staff-accounts')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'staff-accounts'
+                ? 'bg-emerald-800 text-white shadow-md ring-2 ring-emerald-500/40'
+                : 'bg-emerald-50 text-emerald-950 border border-emerald-300 hover:bg-emerald-100'
+            }`}
+          >
+            <KeyRound className="w-4 h-4 text-emerald-700" />
+            <span>حسابات وكلمات سر الموظفين (42)</span>
+            {pendingResetCount > 0 ? (
+              <span className="text-[10px] bg-rose-600 text-white font-black px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1 shadow-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+                <span>{pendingResetCount} طلب تفعيل معلق</span>
+              </span>
+            ) : (
+              <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.5 rounded-full">
+                لوحة التحكم
+              </span>
+            )}
           </button>
 
           <button
@@ -1051,9 +1127,39 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
         </div>
       )}
 
+      {/* Tab: Staff Accounts & Passwords Manager */}
+      {activeTab === 'staff-accounts' && (
+        <StaffAccountsManager />
+      )}
+
       {/* Tab: Roster & Directory */}
       {activeTab === 'roster' && (
         <div className="space-y-6">
+          {/* Quick link to Staff Passwords Manager */}
+          <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-emerald-100/50 border border-emerald-200 rounded-3xl p-5 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xs">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-700 text-white flex items-center justify-center shrink-0 shadow-xs">
+                <KeyRound className="w-6 h-6" />
+              </div>
+              <div>
+                <h4 className="font-bold text-slate-900 text-sm sm:text-base">
+                  لوحة إدارة أرقام التعريف المهنية وكلمات سر الأساتذة (42 موظفاً)
+                </h4>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  يمكنك كمدير للمؤسسة الاطلاع على كلمات سر كافة الأساتذة (إظهار/إخفاء)، إعادة ضبطها، ونسخ بطاقات الدخول الرسمية.
+                </p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => setActiveTab('staff-accounts')}
+              className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-2 shadow-xs transition-all shrink-0"
+            >
+              <span>فتح لوحة كلمات السر والتحكم</span>
+              <KeyRound className="w-4 h-4" />
+            </button>
+          </div>
+
           {/* Teachers Section */}
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
             <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
