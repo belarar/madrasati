@@ -1192,7 +1192,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 <input
                   type="text"
                   required
-                  placeholder="مثال: 1097448010036809"
+                  placeholder="أدخل رقم التعريف المدرسي (16 رقماً)"
                   value={newStudentId}
                   onChange={e => setNewStudentId(e.target.value)}
                   className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 outline-none text-sm font-mono"

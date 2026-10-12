@@ -1,29 +1,18 @@
-import React, { useMemo, useState } from 'react';
+import React, { useState } from 'react';
 import {
   AlertCircle,
   Building,
-  CheckCircle2,
   GraduationCap,
-  KeyRound,
   Lock,
   LogIn,
-  Mail,
-  Search,
   Shield,
-  Sparkles,
   UserCheck,
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SCHOOL_NAME } from '../data/mockData';
-import { OFFICIAL_STUDENTS_LIST, OfficialStudentRosterItem } from '../data/officialStudents';
-import { OFFICIAL_STAFF_LIST, OfficialStaffMember } from '../data/officialStaff';
 import {
   authenticateOfficialStudent,
   authenticateUser,
-  directResetPassword,
-  normalizeArabic,
-  registerNewUser,
-  setCurrentUser,
 } from '../services/storageService';
 import { UserProfile } from '../types';
 
@@ -46,23 +35,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   const [staffId, setStaffId] = useState('');
   const [staffPin, setStaffPin] = useState('');
 
-  // Password Reset by Email state
-  const [isResetMode, setIsResetMode] = useState(false);
-  const [resetIdentifier, setResetIdentifier] = useState('');
-  const [resetEmail, setResetEmail] = useState('');
-  const [newPassword, setNewPassword] = useState('');
-  const [confirmPassword, setConfirmPassword] = useState('');
-  const [resetSuccessMessage, setResetSuccessMessage] = useState<string | null>(null);
-
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // Live detection of staff member based on typed staffId
-  const detectedStaffMember = useMemo<OfficialStaffMember | undefined>(() => {
-    const clean = staffId.trim().toLowerCase();
-    if (!clean) return undefined;
-    return OFFICIAL_STAFF_LIST.find(s => s.identifier.toLowerCase() === clean);
-  }, [staffId]);
 
   if (!isOpen) return null;
 
@@ -117,6 +91,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
       return;
     }
 
+    if (!staffPin.trim()) {
+      setError('يرجى إدخال كلمة السر الخاصة بك.');
+      return;
+    }
+
     setLoading(true);
     setTimeout(() => {
       const res = authenticateUser(cleanStaffId, staffPin.trim());
@@ -134,52 +113,6 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     }, 250);
   };
 
-  // Direct Password Reset & Instant Login
-  const handleDirectReset = (e: React.FormEvent) => {
-    e.preventDefault();
-    setError(null);
-
-    if (!resetIdentifier.trim()) {
-      setError('يرجى إدخال رقم التعريف المهني.');
-      return;
-    }
-
-    if (!newPassword.trim()) {
-      setError('يرجى كتابة كلمة السر الجديدة.');
-      return;
-    }
-
-    if (newPassword.trim().length < 4) {
-      setError('كلمة السر يجب أن تتكون من 4 خانات على الأقل.');
-      return;
-    }
-
-    if (newPassword.trim() !== confirmPassword.trim()) {
-      setError('كلمتا السر غير متطابقتين.');
-      return;
-    }
-
-    setLoading(true);
-    setTimeout(() => {
-      const res = directResetPassword(
-        resetIdentifier.trim(),
-        resetEmail.trim(),
-        newPassword.trim()
-      );
-      setLoading(false);
-
-      if (res.success && res.user) {
-        setResetSuccessMessage('تم تعيين كلمة السر بنجاح (4 خانات فما فوق)! جاري تسجيل الدخول...');
-        setTimeout(() => {
-          onLoginSuccess(res.user!);
-          onClose();
-        }, 700);
-      } else {
-        setError(res.message);
-      }
-    }, 300);
-  };
-
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/65 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
@@ -191,7 +124,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
             </div>
             <div>
               <h2 className="font-bold text-base sm:text-lg text-white">
-                {isResetMode ? 'استرجاع وتعيين كلمة السر بالبريد الإلكتروني' : 'تسجيل الدخول إلى المنصة الرقمية'}
+                تسجيل الدخول إلى المنصة الرقمية
               </h2>
               <p className="text-xs text-emerald-200">{SCHOOL_NAME}</p>
             </div>
@@ -204,44 +137,42 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
           </button>
         </div>
 
-        {/* Category Tabs (Hide when in reset mode) */}
-        {!isResetMode && (
-          <div className="p-4 pb-0 shrink-0">
-            <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 text-xs font-bold">
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveCategory('student');
-                  setError(null);
-                }}
-                className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
-                  activeCategory === 'student'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
-              >
-                <GraduationCap className="w-4 h-4" />
-                <span>فضاء التلاميذ</span>
-              </button>
+        {/* Category Tabs */}
+        <div className="p-4 pb-0 shrink-0">
+          <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 text-xs font-bold">
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCategory('student');
+                setError(null);
+              }}
+              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeCategory === 'student'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <GraduationCap className="w-4 h-4" />
+              <span>فضاء التلاميذ</span>
+            </button>
 
-              <button
-                type="button"
-                onClick={() => {
-                  setActiveCategory('staff');
-                  setError(null);
-                }}
-                className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2 transition-all ${
-                  activeCategory === 'staff'
-                    ? 'bg-emerald-700 text-white shadow-xs'
-                    : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
-                }`}
-              >
-                <Building className="w-4 h-4" />
-                <span>المدير، الأساتذة والإدارة</span>
-              </button>
-            </div>
+            <button
+              type="button"
+              onClick={() => {
+                setActiveCategory('staff');
+                setError(null);
+              }}
+              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2 transition-all cursor-pointer ${
+                activeCategory === 'staff'
+                  ? 'bg-emerald-700 text-white shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900 hover:bg-slate-200/60'
+              }`}
+            >
+              <Building className="w-4 h-4" />
+              <span>المدير، الأساتذة والإدارة</span>
+            </button>
           </div>
-        )}
+        </div>
 
         {/* Body Content */}
         <div className="p-5 sm:p-6 overflow-y-auto space-y-4 text-right">
@@ -252,134 +183,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
             </div>
           )}
 
-          {resetSuccessMessage && (
-            <div className="p-3 bg-emerald-50 border border-emerald-300 text-emerald-800 rounded-xl text-xs flex items-center gap-2">
-              <CheckCircle2 className="w-4 h-4 shrink-0 text-emerald-600" />
-              <span className="font-bold">{resetSuccessMessage}</span>
-            </div>
-          )}
-
-          {/* Reset Password View */}
-          {isResetMode ? (
-            <div className="space-y-4">
-              <div className="bg-emerald-50/90 border border-emerald-200 p-3.5 rounded-2xl text-xs text-emerald-950 leading-relaxed shadow-xs">
-                <span className="font-bold flex items-center gap-1.5 mb-1 text-emerald-900">
-                  <KeyRound className="w-4 h-4 text-emerald-700" />
-                  <span>تحديث وتعيين كلمة السر للموظف(ة):</span>
-                </span>
-                أدخل رقم تعريفك المهني (16 رقماً) لتعيين كلمة سر جديدة خاصة بك (من 4 خانات فما فوق) وتسجيل الدخول فوراً وبأمان.
-              </div>
-
-              <form onSubmit={handleDirectReset} className="space-y-3.5">
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    رقم التعريف المهني (16 رقماً): <span className="text-red-500">*</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="text"
-                      required
-                      placeholder="أدخل رقمك المهني (16 رقماً)"
-                      value={resetIdentifier}
-                      onChange={e => setResetIdentifier(e.target.value)}
-                      className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
-                      dir="ltr"
-                    />
-                    <UserCheck className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
-                    البريد الإلكتروني المعتمد <span className="text-slate-400 font-normal">(اختياري):</span>
-                  </label>
-                  <div className="relative">
-                    <input
-                      type="email"
-                      placeholder="اختياري - لتأكيد الحساب"
-                      value={resetEmail}
-                      onChange={e => setResetEmail(e.target.value)}
-                      className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
-                      dir="ltr"
-                    />
-                    <Mail className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      كلمة السر الجديدة (4 خانات فما فوق): <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="password"
-                        required
-                        minLength={4}
-                        placeholder="كلمة السر (4 خانات على الأقل)"
-                        value={newPassword}
-                        onChange={e => setNewPassword(e.target.value)}
-                        className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
-                        dir="ltr"
-                      />
-                      <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
-                    </div>
-                  </div>
-
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      تأكيد كلمة السر: <span className="text-red-500">*</span>
-                    </label>
-                    <div className="relative">
-                      <input
-                        type="password"
-                        required
-                        minLength={4}
-                        placeholder="أعد كتابة كلمة السر للتأكيد"
-                        value={confirmPassword}
-                        onChange={e => setConfirmPassword(e.target.value)}
-                        className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
-                        dir="ltr"
-                      />
-                      <Lock className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="submit"
-                  disabled={loading}
-                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2"
-                >
-                  {loading ? (
-                    <>
-                      <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span>جارٍ حفظ كلمة السر وتأكيد الدخول...</span>
-                    </>
-                  ) : (
-                    <>
-                      <KeyRound className="w-4 h-4" />
-                      <span>حفظ كلمة السر الجديدة وتسجيل الدخول فوراً</span>
-                    </>
-                  )}
-                </button>
-
-                <div className="text-center pt-2">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsResetMode(false);
-                      setError(null);
-                    }}
-                    className="text-xs text-slate-600 hover:text-slate-900 font-bold hover:underline"
-                  >
-                    ← العودة إلى تسجيل الدخول
-                  </button>
-                </div>
-              </form>
-            </div>
-          ) : activeCategory === 'student' ? (
-            /* Student Entrance: رقم التعريف المدرسي أو اللقب والاسم مع حماية الخصوصية التامة */
+          {activeCategory === 'student' ? (
+            /* Student Entrance */
             <div className="space-y-4">
               <div className="bg-emerald-50/90 border border-emerald-200 p-3.5 rounded-2xl text-xs text-emerald-950 leading-relaxed shadow-xs">
                 <span className="font-bold flex items-center gap-1.5 mb-1 text-emerald-900">
@@ -505,7 +310,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     <input
                       type="text"
                       required
-                      placeholder="أدخل رقمك المهني (مثال: 1097448010036800 أو 1197348010089800)"
+                      placeholder="أدخل رقمك المهني المكون من 16 رقماً"
                       value={staffId}
                       onChange={e => setStaffId(e.target.value)}
                       className="w-full pl-4 pr-10 py-3 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
@@ -513,41 +318,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     />
                     <UserCheck className="w-5 h-5 text-slate-400 absolute right-3 top-3.5" />
                   </div>
-
-                  {detectedStaffMember && (
-                    <div className="mt-1.5 p-2 bg-emerald-50 border border-emerald-200 rounded-lg text-xs text-emerald-800 flex items-center justify-between">
-                      <span className="font-bold">
-                        ✅ تم التعرف: {detectedStaffMember.surname} {detectedStaffMember.firstName} ({detectedStaffMember.rank})
-                      </span>
-                    </div>
-                  )}
                 </div>
 
                 <div>
-                  <div className="flex items-center justify-between mb-1.5">
-                    <label className="text-xs font-bold text-slate-700">
-                      كلمة السر: <span className="text-red-500">*</span>
-                    </label>
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setIsResetMode(true);
-                        setResetIdentifier(staffId || '');
-                        setResetEmail('');
-                        setError(null);
-                      }}
-                      className="text-[11px] text-emerald-700 hover:text-emerald-900 font-bold hover:underline flex items-center gap-1"
-                    >
-                      <KeyRound className="w-3.5 h-3.5" />
-                      <span>نسيت كلمة السر؟ تحديثها هنا</span>
-                    </button>
-                  </div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    كلمة السر: <span className="text-red-500">*</span>
+                  </label>
                   <div className="relative">
                     <input
                       type="password"
                       required
                       minLength={4}
-                      placeholder="أدخل كلمة السر الخاصة بك (4 خانات فما فوق)"
+                      placeholder="أدخل كلمة السر الخاصة بك"
                       value={staffPin}
                       onChange={e => setStaffPin(e.target.value)}
                       className="w-full pl-4 pr-10 py-3 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono tracking-widest"
@@ -555,15 +337,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     />
                     <Lock className="w-5 h-5 text-slate-400 absolute right-3 top-3.5" />
                   </div>
-                  <span className="text-[11px] text-slate-500 mt-1 block">
-                    كلمة السر الشخصية للموظف(ة) يجب أن تتكون من 4 خانات على الأقل. إذا نسيت كلمة السر، يمكنك تحديثها فوراً.
-                  </span>
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2"
+                  className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 mt-2 cursor-pointer"
                 >
                   {loading ? (
                     <>
@@ -578,20 +357,12 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                   )}
                 </button>
 
-                <div className="pt-2 text-center border-t border-slate-200">
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setIsResetMode(true);
-                      setResetIdentifier(staffId || '');
-                      setResetEmail('');
-                      setError(null);
-                    }}
-                    className="text-xs text-slate-600 hover:text-emerald-800 font-semibold inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-                  >
-                    <KeyRound className="w-3.5 h-3.5 text-emerald-700" />
-                    <span>هل نسيت كلمة السر؟ انقر هنا لتحديث وتعيين كلمة سر جديدة فوراً</span>
-                  </button>
+                <div className="mt-4 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 leading-relaxed flex items-start gap-2.5">
+                  <Shield className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />
+                  <div>
+                    <span className="font-bold text-slate-800 block mb-0.5">حماية وأمان الحسابات:</span>
+                    لحماية الحسابات من أي محاولة دخول غير مصرح بها، تم حظر أي استرجاع مباشر من الواجهة العامة. في حالة نسيان كلمة السر، يُرجى مراجعة إدارة المؤسسة أو السيد المدير شخصياً لإعادة ضبطها.
+                  </div>
                 </div>
               </form>
             </div>
