@@ -243,13 +243,20 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
             {/* Role Switcher / Login Action */}
             <button
               onClick={onOpenLogin}
-              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 text-xs font-bold border border-emerald-300 transition-all shadow-2xs cursor-pointer active:scale-95"
+              style={{
+                backgroundColor: '#064e3b',
+                color: '#fef08a',
+                borderColor: '#10b981',
+              }}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-emerald-900 hover:bg-emerald-950 text-yellow-300 text-xs font-black border-2 border-emerald-500 transition-all shadow-sm cursor-pointer active:scale-95"
               title="دخول تلميذ جديد أو موظف"
             >
-              <div className="w-5 h-5 rounded-md bg-emerald-700 text-white flex items-center justify-center shrink-0">
-                <ArrowRightLeft className="w-3 h-3" />
+              <div className="w-5 h-5 rounded-md bg-yellow-400 text-emerald-950 flex items-center justify-center shrink-0 shadow-2xs">
+                <ArrowRightLeft className="w-3 h-3 stroke-[2.5]" />
               </div>
-              <span>{currentUser ? 'تبديل الحساب' : 'تسجيل الدخول'}</span>
+              <span style={{ color: '#fef08a', fontWeight: 900 }}>
+                {currentUser ? 'تبديل الحساب' : 'تسجيل الدخول'}
+              </span>
             </button>
 
             {/* Current User Badge */}

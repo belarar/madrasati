@@ -175,57 +175,86 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     <div className="fixed inset-0 z-50 flex items-center justify-center p-3 sm:p-4 bg-slate-900/65 backdrop-blur-xs animate-in fade-in duration-200">
       <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col max-h-[94vh]">
         {/* Header */}
-        <div className="bg-emerald-900 bg-linear-to-r from-emerald-900 via-teal-900 to-emerald-950 text-white p-5 flex items-center justify-between shrink-0 shadow-md">
+        <div
+          style={{ backgroundColor: '#064e3b', color: '#ffffff' }}
+          className="bg-emerald-900 text-white p-5 flex items-center justify-between shrink-0 shadow-md"
+        >
           <div className="flex items-center gap-3">
-            <div className="w-10 h-10 rounded-2xl bg-white/15 flex items-center justify-center border border-white/20 shadow-inner">
-              <LogIn className="w-5 h-5 text-emerald-300" />
+            <div className="w-10 h-10 rounded-2xl bg-white/20 flex items-center justify-center border border-white/30 shadow-inner">
+              <LogIn className="w-5 h-5 text-yellow-300" />
             </div>
             <div>
-              <h2 className="font-bold text-base sm:text-lg text-white">
+              <h2
+                style={{ color: '#ffffff', fontWeight: 900 }}
+                className="font-black text-base sm:text-lg text-white"
+              >
                 تسجيل الدخول إلى المنصة الرقمية
               </h2>
-              <p className="text-xs text-emerald-200">{SCHOOL_NAME}</p>
+              <p
+                style={{ color: '#fef08a', fontWeight: 700 }}
+                className="text-xs text-yellow-200 font-bold"
+              >
+                {SCHOOL_NAME}
+              </p>
             </div>
           </div>
-          {/* Prominent High-Contrast Exit Button */}
+          {/* Prominent Red Exit Button */}
           <button
             onClick={onClose}
             type="button"
-            className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-white/15 hover:bg-rose-600 text-white border border-white/30 hover:border-rose-400 transition-all shadow-xs cursor-pointer group"
+            style={{ backgroundColor: '#dc2626', color: '#ffffff' }}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-2xl bg-red-600 hover:bg-red-700 text-white border-2 border-red-400 transition-all shadow-md cursor-pointer group active:scale-95"
             title="خروج وإغلاق النافذة"
           >
-            <div className="w-5 h-5 rounded-lg bg-black/20 group-hover:bg-white/20 flex items-center justify-center">
-              <X className="w-4 h-4 text-white stroke-[2.5]" />
+            <div className="w-5 h-5 rounded-lg bg-black/20 flex items-center justify-center">
+              <X className="w-4 h-4 text-white stroke-[3]" />
             </div>
-            <span className="text-xs font-bold text-white">خروج</span>
+            <span
+              style={{ color: '#ffffff', fontWeight: 900 }}
+              className="text-xs font-black text-white"
+            >
+              خروج
+            </span>
           </button>
         </div>
 
         {/* Category Tabs */}
         <div className="p-4 pb-0 shrink-0">
-          <div className="grid grid-cols-2 gap-2 bg-slate-100 p-1.5 rounded-2xl border border-slate-200 text-xs font-bold">
+          <div className="grid grid-cols-2 gap-2 bg-slate-200/80 p-1.5 rounded-2xl border-2 border-slate-300 text-xs font-bold">
             <button
               type="button"
               onClick={() => {
                 setActiveCategory('student');
                 setError(null);
               }}
-              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer ${
+              style={{
+                backgroundColor: activeCategory === 'student' ? '#064e3b' : '#f8fafc',
+                color: activeCategory === 'student' ? '#fef08a' : '#0f172a',
+              }}
+              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer border ${
                 activeCategory === 'student'
-                  ? 'bg-emerald-700 text-white shadow-xs font-black'
-                  : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/70 font-bold'
+                  ? 'border-emerald-700 shadow-md font-black'
+                  : 'border-slate-300 hover:bg-white text-slate-900 font-bold'
               }`}
             >
               <div
                 className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
                   activeCategory === 'student'
-                    ? 'bg-emerald-900 text-white'
-                    : 'bg-slate-200 text-emerald-800'
+                    ? 'bg-yellow-400 text-emerald-950'
+                    : 'bg-slate-300 text-slate-800'
                 }`}
               >
                 <GraduationCap className="w-4 h-4 stroke-[2.5]" />
               </div>
-              <span>فضاء التلاميذ</span>
+              <span
+                style={{
+                  color: activeCategory === 'student' ? '#fef08a' : '#0f172a',
+                  fontWeight: 900,
+                  fontSize: '13px',
+                }}
+              >
+                فضاء التلاميذ
+              </span>
             </button>
 
             <button
@@ -234,22 +263,34 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 setActiveCategory('staff');
                 setError(null);
               }}
-              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer ${
+              style={{
+                backgroundColor: activeCategory === 'staff' ? '#064e3b' : '#f8fafc',
+                color: activeCategory === 'staff' ? '#fef08a' : '#0f172a',
+              }}
+              className={`py-3 px-3 rounded-xl flex items-center justify-center gap-2.5 transition-all cursor-pointer border ${
                 activeCategory === 'staff'
-                  ? 'bg-emerald-700 text-white shadow-xs font-black'
-                  : 'text-slate-700 hover:text-slate-900 hover:bg-slate-200/70 font-bold'
+                  ? 'border-emerald-700 shadow-md font-black'
+                  : 'border-slate-300 hover:bg-white text-slate-900 font-bold'
               }`}
             >
               <div
                 className={`w-6 h-6 rounded-lg flex items-center justify-center shrink-0 ${
                   activeCategory === 'staff'
-                    ? 'bg-emerald-900 text-white'
-                    : 'bg-slate-200 text-emerald-800'
+                    ? 'bg-yellow-400 text-emerald-950'
+                    : 'bg-slate-300 text-slate-800'
                 }`}
               >
                 <Building className="w-4 h-4 stroke-[2.5]" />
               </div>
-              <span>المدير، الأساتذة والإدارة</span>
+              <span
+                style={{
+                  color: activeCategory === 'staff' ? '#fef08a' : '#0f172a',
+                  fontWeight: 900,
+                  fontSize: '13px',
+                }}
+              >
+                المدير، الأساتذة والإدارة
+              </span>
             </button>
           </div>
         </div>
@@ -278,10 +319,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 {/* 1. School ID (16 digits) */}
                 <div>
                   <div className="flex items-center justify-between mb-1">
-                    <label className="text-xs font-bold text-slate-700">
-                      رقم التعريف المدرسي (16 رقماً): <span className="text-red-500 font-black">* إلزامي</span>
+                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="text-xs font-black text-slate-900">
+                      رقم التعريف المدرسي (16 رقماً): <span className="text-red-600 font-black">* إلزامي</span>
                     </label>
-                    <span className="text-[10px] text-emerald-700 font-bold bg-emerald-100/80 px-2 py-0.5 rounded-full border border-emerald-300">
+                    <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-400">
                       من الشهادة أو كشف النقاط
                     </span>
                   </div>
@@ -292,25 +333,27 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       placeholder="أدخل رقمك المدرسي المكون من 16 رقماً"
                       value={studentId}
                       onChange={e => setStudentId(e.target.value)}
-                      className="w-full pl-4 pr-10 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
+                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                      className="w-full pl-4 pr-10 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none font-mono bg-white"
                       dir="ltr"
                     />
-                    <UserCheck className="w-4 h-4 text-slate-400 absolute right-3 top-3" />
+                    <UserCheck className="w-4 h-4 text-emerald-700 absolute right-3 top-3.5" />
                   </div>
-                  <span className="text-[10px] text-slate-500 mt-1 block">
+                  <span style={{ color: '#475569' }} className="text-[10px] text-slate-600 font-medium mt-1 block">
                     يضمن عدم تمكن أي زميل آخر من الدخول إلى حسابك.
                   </span>
                 </div>
 
                 {/* 2. Class Selection */}
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1">
+                  <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1">
                     القسم الدراسي:
                   </label>
                   <select
                     value={studentClassId}
                     onChange={e => setStudentClassId(e.target.value)}
-                    className="w-full px-4 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none bg-white font-bold"
+                    style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                    className="w-full px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none bg-white font-bold"
                   >
                     {SCHOOL_CLASSES.map(cls => (
                       <option key={cls.id} value={cls.id}>
@@ -323,8 +366,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 {/* 3. Surname and First Name in 2 inputs */}
                 <div className="grid grid-cols-2 gap-3">
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      اللقب: <span className="text-red-500 font-black">* إلزامي</span>
+                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1">
+                      اللقب: <span className="text-red-600 font-black">* إلزامي</span>
                     </label>
                     <input
                       type="text"
@@ -332,13 +375,14 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       placeholder="لقب التلميذ(ة)"
                       value={studentSurname}
                       onChange={e => setStudentSurname(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none"
+                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                      className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none bg-white"
                     />
                   </div>
 
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      الاسم: <span className="text-red-500 font-black">* إلزامي</span>
+                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1">
+                      الاسم: <span className="text-red-600 font-black">* إلزامي</span>
                     </label>
                     <input
                       type="text"
@@ -346,7 +390,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       placeholder="اسم التلميذ(ة)"
                       value={studentFirstName}
                       onChange={e => setStudentFirstName(e.target.value)}
-                      className="w-full px-3.5 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none"
+                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                      className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none bg-white"
                     />
                   </div>
                 </div>
@@ -354,20 +399,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-extrabold text-sm sm:text-base shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border border-emerald-600/50"
+                  style={{
+                    backgroundColor: '#064e3b',
+                    color: '#fef08a',
+                    borderColor: '#10b981',
+                  }}
+                  className="w-full py-4 px-5 rounded-2xl bg-emerald-900 hover:bg-emerald-950 active:scale-98 text-yellow-300 font-extrabold text-base sm:text-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border-2 border-emerald-500"
                 >
                   {loading ? (
                     <>
-                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span className="text-white font-bold">جارٍ التحقق والدخول إلى الفضاء...</span>
+                      <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full animate-spin" />
+                      <span style={{ color: '#fef08a', fontWeight: 900 }}>جارٍ التحقق والدخول إلى الفضاء...</span>
                     </>
                   ) : (
                     <>
-                      <div className="w-8 h-8 rounded-xl bg-emerald-900/60 border border-emerald-400/40 flex items-center justify-center shrink-0 shadow-inner">
-                        <GraduationCap className="w-5 h-5 text-emerald-200 stroke-[2.5]" />
+                      <div className="w-8 h-8 rounded-xl bg-yellow-400 text-emerald-950 flex items-center justify-center shrink-0 shadow-md">
+                        <GraduationCap className="w-5 h-5 stroke-[2.5]" />
                       </div>
-                      <span className="text-white font-black text-sm sm:text-base">دخول فضاء التلميذ الآن</span>
-                      <ArrowRight className="w-4 h-4 text-emerald-300 rtl:rotate-180" />
+                      <span
+                        style={{
+                          color: '#fef08a',
+                          fontWeight: 900,
+                          fontSize: '17px',
+                          textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+                        }}
+                        className="text-yellow-200 font-black tracking-wide"
+                      >
+                        دخول فضاء التلميذ الآن
+                      </span>
+                      <ArrowRight className="w-5 h-5 text-yellow-300 rtl:rotate-180 stroke-[2.5]" />
                     </>
                   )}
                 </button>
@@ -573,8 +633,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
 
               <form onSubmit={handleStaffSubmit} className="space-y-4">
                 <div>
-                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
-                    رقم التعريف المهني (16 رقماً): <span className="text-red-500">*</span>
+                  <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1.5">
+                    رقم التعريف المهني (16 رقماً): <span className="text-red-600 font-black">*</span>
                   </label>
                   <div className="relative">
                     <input
@@ -583,17 +643,18 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       placeholder="أدخل رقمك المهني المكون من 16 رقماً"
                       value={staffId}
                       onChange={e => setStaffId(e.target.value)}
-                      className="w-full pl-4 pr-10 py-3 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono"
+                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                      className="w-full pl-4 pr-10 py-3 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none font-mono bg-white"
                       dir="ltr"
                     />
-                    <UserCheck className="w-5 h-5 text-slate-400 absolute right-3 top-3.5" />
+                    <UserCheck className="w-5 h-5 text-emerald-700 absolute right-3 top-3.5" />
                   </div>
                 </div>
 
                 <div>
                   <div className="flex items-center justify-between mb-1.5">
-                    <label className="block text-xs font-bold text-slate-700">
-                      كلمة السر: <span className="text-red-500">*</span>
+                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900">
+                      كلمة السر: <span className="text-red-600 font-black">*</span>
                     </label>
                     <button
                       type="button"
@@ -603,6 +664,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                         setResetFeedback(null);
                         setError(null);
                       }}
+                      style={{ color: '#047857' }}
                       className="text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:underline flex items-center gap-1 cursor-pointer"
                     >
                       <KeyRound className="w-3.5 h-3.5" />
@@ -617,30 +679,46 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                       placeholder="أدخل كلمة السر الخاصة بك"
                       value={staffPin}
                       onChange={e => setStaffPin(e.target.value)}
-                      className="w-full pl-4 pr-10 py-3 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none font-mono tracking-widest"
+                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
+                      className="w-full pl-4 pr-10 py-3 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none font-mono tracking-widest bg-white"
                       dir="ltr"
                     />
-                    <Lock className="w-5 h-5 text-slate-400 absolute right-3 top-3.5" />
+                    <Lock className="w-5 h-5 text-emerald-700 absolute right-3 top-3.5" />
                   </div>
                 </div>
 
                 <button
                   type="submit"
                   disabled={loading}
-                  className="w-full py-3.5 px-5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 active:scale-98 text-white font-extrabold text-sm sm:text-base shadow-md hover:shadow-lg transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border border-emerald-600/50"
+                  style={{
+                    backgroundColor: '#064e3b',
+                    color: '#fef08a',
+                    borderColor: '#10b981',
+                  }}
+                  className="w-full py-4 px-5 rounded-2xl bg-emerald-900 hover:bg-emerald-950 active:scale-98 text-yellow-300 font-extrabold text-base sm:text-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border-2 border-emerald-500"
                 >
                   {loading ? (
                     <>
-                      <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                      <span className="text-white font-bold">جارٍ التحقق من بيانات الدخول...</span>
+                      <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full animate-spin" />
+                      <span style={{ color: '#fef08a', fontWeight: 900 }}>جارٍ التحقق من بيانات الدخول...</span>
                     </>
                   ) : (
                     <>
-                      <div className="w-8 h-8 rounded-xl bg-emerald-900/60 border border-emerald-400/40 flex items-center justify-center shrink-0 shadow-inner">
-                        <LogIn className="w-5 h-5 text-emerald-200 stroke-[2.5]" />
+                      <div className="w-8 h-8 rounded-xl bg-yellow-400 text-emerald-950 flex items-center justify-center shrink-0 shadow-md">
+                        <LogIn className="w-5 h-5 stroke-[2.5]" />
                       </div>
-                      <span className="text-white font-black text-sm sm:text-base">تسجيل الدخول إلى حسابي</span>
-                      <ArrowRight className="w-4 h-4 text-emerald-300 rtl:rotate-180" />
+                      <span
+                        style={{
+                          color: '#fef08a',
+                          fontWeight: 900,
+                          fontSize: '17px',
+                          textShadow: '0 1px 2px rgba(0,0,0,0.6)',
+                        }}
+                        className="text-yellow-200 font-black tracking-wide"
+                      >
+                        تسجيل الدخول إلى حسابي
+                      </span>
+                      <ArrowRight className="w-5 h-5 text-yellow-300 rtl:rotate-180 stroke-[2.5]" />
                     </>
                   )}
                 </button>

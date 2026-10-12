@@ -220,10 +220,15 @@ export default function App() {
               <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
                 <button
                   onClick={() => setLoginModalOpen(true)}
-                  className="px-6 py-3.5 rounded-2xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm sm:text-base shadow-md transition-transform active:scale-95 flex items-center gap-2"
+                  style={{
+                    backgroundColor: '#064e3b',
+                    color: '#fef08a',
+                    borderColor: '#10b981',
+                  }}
+                  className="px-6 py-3.5 rounded-2xl bg-emerald-900 hover:bg-emerald-950 text-yellow-300 font-extrabold text-sm sm:text-base shadow-lg transition-transform active:scale-95 flex items-center gap-2.5 border-2 border-emerald-500 cursor-pointer"
                 >
-                  <LogIn className="w-5 h-5" />
-                  <span>تسجيل الدخول إلى المنصة</span>
+                  <LogIn className="w-5 h-5 text-yellow-300" />
+                  <span style={{ color: '#fef08a', fontWeight: 900 }}>تسجيل الدخول إلى المنصة</span>
                 </button>
 
                 <button
@@ -286,10 +291,17 @@ export default function App() {
                 <p className="text-xs text-slate-500 leading-relaxed mb-3">
                   الدخول برقم التعريف المدرسي الخاص (16 رقماً) مع اللقب والاسم معاً لضمان أمان الحساب ومنع دخول أي زميل آخر.
                 </p>
-                <div className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-emerald-700 text-white text-xs font-bold group-hover:bg-emerald-800 transition-colors shadow-2xs">
-                  <GraduationCap className="w-4 h-4 text-emerald-200" />
-                  <span>دخول فضاء التلميذ الآن</span>
-                  <ArrowRight className="w-3.5 h-3.5 rtl:rotate-180" />
+                <div
+                  style={{
+                    backgroundColor: '#064e3b',
+                    color: '#fef08a',
+                    borderColor: '#10b981',
+                  }}
+                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-900 text-yellow-300 text-xs font-black shadow-md border-2 border-emerald-500 group-hover:bg-emerald-950 transition-colors"
+                >
+                  <GraduationCap className="w-4 h-4 text-yellow-300" />
+                  <span style={{ color: '#fef08a', fontWeight: 900 }}>دخول فضاء التلميذ الآن</span>
+                  <ArrowRight className="w-3.5 h-3.5 text-yellow-300 rtl:rotate-180" />
                 </div>
               </div>
 
