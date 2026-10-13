@@ -118,6 +118,9 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   // Target Filter for Announcements List
   const [filterTarget, setFilterTarget] = useState<AnnouncementTarget | 'ALL'>('ALL');
 
+  // Staff Category Filter for Roster List
+  const [staffCategoryFilter, setStaffCategoryFilter] = useState<'all' | 'teachers' | 'admin' | 'supervisors' | 'workers'>('all');
+
   // Pending password reset requests counter (Requiring director approval)
   const [pendingResetCount, setPendingResetCount] = useState<number>(() => getPendingResetRequestsCount());
 
@@ -1160,35 +1163,168 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             </button>
           </div>
 
-          {/* Teachers Section */}
+          {/* Staff Roster Section */}
           <div className="bg-white rounded-3xl border border-slate-200 p-6 shadow-xs space-y-4">
-            <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
-              <UserCheck className="w-5 h-5 text-emerald-700" />
-              <span>قائمة الأساتذة المسجلين بالمنصة</span>
-            </h3>
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+              <div>
+                <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
+                  <UserCheck className="w-5 h-5 text-emerald-700" />
+                  <span>قائمة موظفي وأساتذة المؤسسة المعتمدين (42 موظفاً)</span>
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  تضم هيئة التدريس، إدارة المؤسسة، المصالح الاقتصادية، مستشارية التوجيه، سلك الإشراف والعمال المهنيين.
+                </p>
+              </div>
+
+              {/* Category Filter Chips */}
+              <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
+                <button
+                  type="button"
+                  onClick={() => setStaffCategoryFilter('all')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    staffCategoryFilter === 'all'
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  الكل (42)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffCategoryFilter('teachers')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    staffCategoryFilter === 'teachers'
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  الأساتذة (22)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffCategoryFilter('admin')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    staffCategoryFilter === 'admin'
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  الإدارة والتوجيه والمقتصدية (7)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffCategoryFilter('supervisors')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    staffCategoryFilter === 'supervisors'
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  مشرفو التربية (3)
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setStaffCategoryFilter('workers')}
+                  className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                    staffCategoryFilter === 'workers'
+                      ? 'bg-emerald-700 text-white'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  العمال والوقاية (10)
+                </button>
+              </div>
+            </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {MOCK_USERS.filter(u => u.role === 'teacher').map(teacher => {
-                const teacherDocs = documents.filter(d => d.authorId === teacher.id);
-                return (
-                  <div
-                    key={teacher.id}
-                    className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-300 transition-all space-y-2"
-                  >
-                    <div className="flex items-center justify-between">
-                      <span className="font-bold text-slate-900 text-sm">{teacher.name}</span>
-                      <span className="text-[11px] font-mono bg-slate-200 px-2 py-0.5 rounded text-slate-700">
-                        {teacher.identifier}
-                      </span>
+              {getAllUsers()
+                .filter(u => u.role !== 'student')
+                .filter(u => {
+                  if (staffCategoryFilter === 'teachers') return u.role === 'teacher';
+                  if (staffCategoryFilter === 'admin') {
+                    return (
+                      u.role === 'director' ||
+                      u.role === 'censor' ||
+                      ['مقتصد', 'مقتصدة', 'مستشار', 'مستشارة', 'عون إدارة', 'عون حفظ البيانات', 'كاتب', 'كاتبة'].some(
+                        k => u.title?.includes(k)
+                      )
+                    );
+                  }
+                  if (staffCategoryFilter === 'supervisors') {
+                    return Boolean(u.title?.includes('مشرف'));
+                  }
+                  if (staffCategoryFilter === 'workers') {
+                    return Boolean(u.title?.includes('عامل') || u.title?.includes('وقاية'));
+                  }
+                  return true;
+                })
+                .map(staff => {
+                  const staffDocs = documents.filter(d => d.authorId === staff.id);
+                  const isSupervisor = staff.title?.includes('مشرف');
+                  const isAdmin =
+                    staff.role === 'director' ||
+                    staff.role === 'censor' ||
+                    ['مقتصد', 'مستشار', 'إدارة', 'بيانات', 'كاتب'].some(k => staff.title?.includes(k));
+                  const isWorker = staff.title?.includes('عامل') || staff.title?.includes('وقاية');
+
+                  return (
+                    <div
+                      key={staff.id}
+                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-300 transition-all space-y-2"
+                    >
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-bold text-slate-900 text-sm truncate">{staff.name}</span>
+                        <span
+                          className="text-[11px] font-mono bg-slate-200 px-2 py-0.5 rounded text-slate-700 font-bold tracking-wider shrink-0"
+                          dir="ltr"
+                        >
+                          {staff.identifier}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <span
+                          className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                            staff.role === 'director'
+                              ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                              : staff.role === 'censor'
+                              ? 'bg-indigo-100 text-indigo-950 border-indigo-300'
+                              : staff.title?.includes('مقتصد')
+                              ? 'bg-amber-100 text-amber-950 border-amber-300'
+                              : staff.title?.includes('مستشار')
+                              ? 'bg-purple-100 text-purple-950 border-purple-300'
+                              : isSupervisor
+                              ? 'bg-blue-100 text-blue-950 border-blue-300'
+                              : isAdmin
+                              ? 'bg-teal-100 text-teal-950 border-teal-300'
+                              : isWorker
+                              ? 'bg-amber-50 text-amber-950 border-amber-200'
+                              : 'bg-slate-100 text-slate-800 border-slate-200'
+                          }`}
+                        >
+                          {staff.title || 'موظف بالمؤسسة'}
+                        </span>
+                      </div>
+
+                      <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-200/60">
+                        <span>
+                          {staff.role === 'teacher'
+                            ? staff.assignedClasses
+                              ? `الأقسام: ${staff.assignedClasses.join('، ')}`
+                              : 'هيئة التدريس'
+                            : isSupervisor
+                            ? 'مصلحة الإشراف والانضباط'
+                            : isAdmin
+                            ? 'إدارة المؤسسة والمصالح'
+                            : 'المصالح العامة والخدمات'}
+                        </span>
+                        {staffDocs.length > 0 ? (
+                          <span className="font-bold text-emerald-700">{staffDocs.length} وثائق</span>
+                        ) : null}
+                      </div>
                     </div>
-                    <p className="text-xs text-slate-600">{teacher.title}</p>
-                    <div className="flex items-center justify-between text-xs text-slate-500 pt-1 border-t border-slate-200/60">
-                      <span>الأقسام: {teacher.assignedClasses?.join('، ')}</span>
-                      <span className="font-bold text-emerald-700">{teacherDocs.length} وثائق</span>
-                    </div>
-                  </div>
-                );
-              })}
+                  );
+                })}
             </div>
           </div>
 

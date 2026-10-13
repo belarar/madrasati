@@ -41,7 +41,7 @@ import { SCHOOL_NAME } from '../../data/mockData';
 export const StaffAccountsManager: React.FC = () => {
   const [staffList, setStaffList] = useState<StaffAccountItem[]>(() => getOfficialStaffAccountList());
   const [searchQuery, setSearchQuery] = useState('');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'teachers' | 'admin'>('all');
+  const [roleFilter, setRoleFilter] = useState<'all' | 'teachers' | 'admin' | 'supervisors' | 'workers'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'configured' | 'pending'>('all');
 
   // Password Reset Requests State
@@ -223,7 +223,17 @@ export const StaffAccountsManager: React.FC = () => {
 
       // Role filter
       if (roleFilter === 'teachers' && staff.role !== 'teacher') return false;
-      if (roleFilter === 'admin' && staff.role === 'teacher') return false;
+      if (roleFilter === 'admin') {
+        const isAdmin = staff.role === 'director' || staff.role === 'censor' ||
+          ['مقتصد', 'مقتصدة', 'مستشار', 'مستشارة', 'عون إدارة', 'عون حفظ البيانات', 'كاتب', 'كاتبة'].some(k => staff.rank.includes(k));
+        if (!isAdmin) return false;
+      }
+      if (roleFilter === 'supervisors') {
+        if (!staff.rank.includes('مشرف')) return false;
+      }
+      if (roleFilter === 'workers') {
+        if (!staff.rank.includes('عامل') && !staff.rank.includes('وقاية')) return false;
+      }
 
       // Status filter
       if (statusFilter === 'configured' && !staff.hasCustomPin) return false;
@@ -236,6 +246,11 @@ export const StaffAccountsManager: React.FC = () => {
   const totalStaff = staffList.length;
   const configuredCount = staffList.filter(s => s.hasCustomPin).length;
   const pendingCount = totalStaff - configuredCount;
+
+  const teachersCount = useMemo(() => staffList.filter(s => s.role === 'teacher').length, [staffList]);
+  const adminCount = useMemo(() => staffList.filter(s => s.role === 'director' || s.role === 'censor' || ['مقتصد', 'مقتصدة', 'مستشار', 'مستشارة', 'عون إدارة', 'عون حفظ البيانات', 'كاتب', 'كاتبة'].some(k => s.rank.includes(k))).length, [staffList]);
+  const supervisorsCount = useMemo(() => staffList.filter(s => s.rank.includes('مشرف')).length, [staffList]);
+  const workersCount = useMemo(() => staffList.filter(s => s.rank.includes('عامل') || s.rank.includes('وقاية')).length, [staffList]);
 
   return (
     <div className="space-y-6 animate-fadeIn">
@@ -614,7 +629,7 @@ export const StaffAccountsManager: React.FC = () => {
           <div className="flex items-center gap-1.5 overflow-x-auto pb-1 sm:pb-0">
             <button
               onClick={() => setRoleFilter('all')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 roleFilter === 'all'
                   ? 'bg-emerald-700 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
@@ -624,23 +639,43 @@ export const StaffAccountsManager: React.FC = () => {
             </button>
             <button
               onClick={() => setRoleFilter('teachers')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 roleFilter === 'teachers'
                   ? 'bg-emerald-700 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
-              الأساتذة فقط (39)
+              الأساتذة ({teachersCount})
             </button>
             <button
               onClick={() => setRoleFilter('admin')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 ${
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
                 roleFilter === 'admin'
                   ? 'bg-emerald-700 text-white'
                   : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
               }`}
             >
-              الإدارة والناظر (3)
+              الإدارة والتوجيه والمقتصدية ({adminCount})
+            </button>
+            <button
+              onClick={() => setRoleFilter('supervisors')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                roleFilter === 'supervisors'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              مشرفو التربية ({supervisorsCount})
+            </button>
+            <button
+              onClick={() => setRoleFilter('workers')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all shrink-0 cursor-pointer ${
+                roleFilter === 'workers'
+                  ? 'bg-emerald-700 text-white'
+                  : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+              }`}
+            >
+              العمال المهنيون والوقاية ({workersCount})
             </button>
           </div>
         </div>
@@ -740,19 +775,28 @@ export const StaffAccountsManager: React.FC = () => {
                           {staff.fullName}
                         </span>
 
-                        {staff.role === 'director' ? (
-                          <span className="px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-900 text-[10px] font-bold border border-emerald-300">
-                            مدير المؤسسة
-                          </span>
-                        ) : staff.role === 'censor' ? (
-                          <span className="px-2 py-0.5 rounded-full bg-indigo-100 text-indigo-900 text-[10px] font-bold border border-indigo-300">
-                            ناظر التعليم المتوسط
-                          </span>
-                        ) : (
-                          <span className="px-2 py-0.5 rounded-full bg-slate-100 text-slate-800 text-[10px] font-bold border border-slate-200">
-                            أستاذ التعليم المتوسط
-                          </span>
-                        )}
+                        {/* Exact Official Rank Badge */}
+                        <span
+                          className={`px-2.5 py-0.5 rounded-full text-[11px] font-black border ${
+                            staff.role === 'director'
+                              ? 'bg-emerald-100 text-emerald-950 border-emerald-300'
+                              : staff.role === 'censor'
+                              ? 'bg-indigo-100 text-indigo-950 border-indigo-300'
+                              : staff.rank.includes('مقتصد')
+                              ? 'bg-amber-100 text-amber-950 border-amber-300'
+                              : staff.rank.includes('مستشار')
+                              ? 'bg-purple-100 text-purple-950 border-purple-300'
+                              : staff.rank.includes('مشرف')
+                              ? 'bg-blue-100 text-blue-950 border-blue-300'
+                              : staff.rank.includes('إدارة') || staff.rank.includes('بيانات') || staff.rank.includes('كاتب')
+                              ? 'bg-teal-100 text-teal-950 border-teal-300'
+                              : staff.rank.includes('عامل') || staff.rank.includes('وقاية')
+                              ? 'bg-amber-50 text-amber-950 border-amber-200'
+                              : 'bg-slate-100 text-slate-800 border-slate-200'
+                          }`}
+                        >
+                          {staff.rank}
+                        </span>
 
                         {staff.subjectName && (
                           <span className="px-2 py-0.5 rounded-md bg-teal-50 text-teal-800 text-[11px] font-bold border border-teal-200">

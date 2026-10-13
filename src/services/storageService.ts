@@ -244,7 +244,23 @@ export function getCurrentUser(): UserProfile | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
     if (!raw) return null; // Clean guest state - user must log in
-    return JSON.parse(raw);
+    const user: UserProfile = JSON.parse(raw);
+
+    // If staff member, synchronize with latest official rank & title
+    const officialStaff = OFFICIAL_STAFF_LIST.find(s => s.identifier === user.identifier);
+    if (officialStaff) {
+      const fresh = toStaffUserProfile(officialStaff);
+      user.name = fresh.name;
+      user.title = fresh.title;
+      user.role = fresh.role;
+      user.subjects = fresh.subjects;
+    } else if (user.role !== 'student') {
+      // If user was removed from official list (e.g. replaced staff), log them out
+      localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
+      return null;
+    }
+
+    return user;
   } catch {
     return null;
   }
@@ -273,11 +289,28 @@ export function getAllUsers(): UserProfile[] {
       officialStaffIds.has(u.identifier) || officialStudentIds.has(u.identifier)
     );
 
+    // Sync official staff members with the latest rank, title, name, role
+    const staffMap = new Map(OFFICIAL_STAFF_LIST.map(s => [s.identifier, s]));
+    const syncedUsers = validUsers.map(u => {
+      const match = staffMap.get(u.identifier);
+      if (match) {
+        const fresh = toStaffUserProfile(match);
+        return {
+          ...u,
+          name: fresh.name,
+          role: fresh.role,
+          title: fresh.title,
+          subjects: fresh.subjects,
+        };
+      }
+      return u;
+    });
+
     // Ensure all 435 official users are present
-    const storedIds = new Set(validUsers.map(u => u.identifier));
+    const storedIds = new Set(syncedUsers.map(u => u.identifier));
     const missing = MOCK_USERS.filter(u => !storedIds.has(u.identifier));
 
-    return [...validUsers, ...missing];
+    return [...syncedUsers, ...missing];
   } catch {
     return MOCK_USERS;
   }
@@ -442,52 +475,76 @@ export function loginOrRegisterStaff(
   const existingIdx = users.findIndex(u => u.identifier.toLowerCase() === cleanId.toLowerCase());
   const cleanPin = pin ? pin.trim() : '';
 
-  const staffUser: UserProfile = {
-    id: existingIdx >= 0 ? users[existingIdx].id : `${actualRole}-${cleanId}`,
-    identifier: cleanId,
-    name: fullName.trim() || (actualRole === 'director' ? 'مدير المؤسسة' : 'أستاذ'),
-    role: actualRole,
-    pin: cleanPin || (existingIdx >= 0 ? users[existingIdx].pin : undefined),
-    title: actualRole === 'director' ? 'مدير متوسطة الشهيد بن نعمة مصطفى' : roleTitle || 'أستاذ التعليم المتوسط',
-  };
+  const officialMatch = OFFICIAL_STAFF_LIST.find(s => s.identifier.toLowerCase() === cleanId.toLowerCase());
+    const fallbackTitle = officialMatch
+      ? toStaffUserProfile(officialMatch).title
+      : actualRole === 'director'
+      ? 'مدير متوسطة الشهيد بن نعمة مصطفى'
+      : roleTitle || 'موظف بالمؤسسة';
+    const fallbackName = officialMatch
+      ? `${officialMatch.surname} ${officialMatch.firstName}`
+      : fullName.trim() || (actualRole === 'director' ? 'مدير المؤسسة' : 'موظف بالمؤسسة');
 
-  const updatedUsers = existingIdx >= 0
-    ? users.map((u, i) => (i === existingIdx ? staffUser : u))
-    : [staffUser, ...users];
-
-  safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
-  setCurrentUser(staffUser);
-  window.dispatchEvent(new Event('auth-change'));
-  return staffUser;
-}
-
-export function authenticateUser(identifier: string, pin?: string): {
-  success: boolean;
-  user?: UserProfile;
-  message?: string;
-  notFound?: boolean;
-  enteredIdentifier?: string;
-} {
-  const cleanId = identifier.trim().toLowerCase();
-
-  if (!cleanId) {
-    return {
-      success: false,
-      message: 'يرجى إدخال رقم التعريف المهني أو المدرسي للمتابعة.',
+    const staffUser: UserProfile = {
+      id: existingIdx >= 0 ? users[existingIdx].id : `${actualRole}-${cleanId}`,
+      identifier: cleanId,
+      name: fallbackName,
+      role: officialMatch ? officialMatch.role : actualRole,
+      pin: cleanPin || (existingIdx >= 0 ? users[existingIdx].pin : undefined),
+      title: fallbackTitle,
+      subjects: officialMatch?.subjectId ? [officialMatch.subjectId] : undefined,
     };
+
+    const updatedUsers = existingIdx >= 0
+      ? users.map((u, i) => (i === existingIdx ? staffUser : u))
+      : [staffUser, ...users];
+
+    safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+    setCurrentUser(staffUser);
+    window.dispatchEvent(new Event('auth-change'));
+    return staffUser;
   }
 
-  const users = getAllUsers();
+  export function authenticateUser(identifier: string, pin?: string): {
+    success: boolean;
+    user?: UserProfile;
+    message?: string;
+    notFound?: boolean;
+    enteredIdentifier?: string;
+  } {
+    const cleanId = identifier.trim().toLowerCase();
 
-  // 1. Check if identifier is in OFFICIAL_STAFF_LIST (All 42 official professors & administration)
-  const officialStaff = OFFICIAL_STAFF_LIST.find(
-    s => s.identifier.toLowerCase() === cleanId || s.identifier === identifier.trim()
-  );
-  const existingStaffUser = users.find(u => u.identifier.toLowerCase() === cleanId);
+    if (!cleanId) {
+      return {
+        success: false,
+        message: 'يرجى إدخال رقم التعريف المهني أو المدرسي للمتابعة.',
+      };
+    }
 
-  if (officialStaff || (existingStaffUser && existingStaffUser.role !== 'student')) {
-    const staffUser: UserProfile = existingStaffUser || toStaffUserProfile(officialStaff!);
-    const enteredPin = pin ? pin.trim() : '';
+    const users = getAllUsers();
+
+    // 1. Check if identifier is in OFFICIAL_STAFF_LIST (All 42 official professors & administration)
+    const officialStaff = OFFICIAL_STAFF_LIST.find(
+      s => s.identifier.toLowerCase() === cleanId || s.identifier === identifier.trim()
+    );
+    const existingStaffUser = users.find(u => u.identifier.toLowerCase() === cleanId);
+
+    if (officialStaff || (existingStaffUser && existingStaffUser.role !== 'student')) {
+      const freshProfile = officialStaff ? toStaffUserProfile(officialStaff) : undefined;
+      const staffUser: UserProfile = existingStaffUser
+        ? {
+            ...existingStaffUser,
+            ...(freshProfile
+              ? {
+                  name: freshProfile.name,
+                  role: freshProfile.role,
+                  title: freshProfile.title,
+                  subjects: freshProfile.subjects,
+                }
+              : {}),
+          }
+        : freshProfile!;
+      const enteredPin = pin ? pin.trim() : '';
 
     if (!enteredPin) {
       return {
