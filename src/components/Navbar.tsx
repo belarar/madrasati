@@ -15,19 +15,25 @@ import {
   LogIn,
   LogOut,
   Menu,
+  RefreshCw,
   Share2,
   Shield,
   Smartphone,
   Sparkles,
   User,
   Users,
+  Wifi,
+  WifiOff,
   X,
 } from 'lucide-react';
 import { MOCK_USERS, SCHOOL_NAME } from '../data/mockData';
 import {
   getNotifications,
+  getSyncStatus,
   getUnreadNotificationsCount,
   setCurrentUser,
+  syncWithServer,
+  SyncStatus,
   updateCurrentUserPassword,
 } from '../services/storageService';
 import { AppNotification, UserProfile, UserRole } from '../types';
@@ -62,7 +68,13 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [pwdMsg, setPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Sync notifications on mount & event
+  // Server Sync Status
+  const [syncState, setSyncState] = useState<{ status: SyncStatus; lastSyncTime: number | null }>(
+    () => getSyncStatus()
+  );
+  const [manualSyncing, setManualSyncing] = useState(false);
+
+  // Sync notifications & connection status on mount & event
   useEffect(() => {
     const updateNotifs = () => {
       const list = getNotifications();
@@ -70,8 +82,27 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
       setUnreadCount(getUnreadNotificationsCount(currentUser?.identifier));
     };
 
+    const handleSyncStatus = (e: any) => {
+      if (e?.detail) {
+        setSyncState(e.detail);
+      } else {
+        setSyncState(getSyncStatus());
+      }
+    };
+
     updateNotifs();
+    setSyncState(getSyncStatus());
     window.addEventListener('notifications-change', updateNotifs);
+    window.addEventListener('sync-status-change', handleSyncStatus);
+
+    const handleOnline = () => {
+      setSyncState(getSyncStatus());
+    };
+    const handleOffline = () => {
+      setSyncState({ status: 'offline', lastSyncTime: getSyncStatus().lastSyncTime });
+    };
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
 
     // Capture PWA install prompt
     const handleBeforeInstall = (e: any) => {
@@ -82,9 +113,23 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
 
     return () => {
       window.removeEventListener('notifications-change', updateNotifs);
+      window.removeEventListener('sync-status-change', handleSyncStatus);
+      window.removeEventListener('online', handleOnline);
+      window.removeEventListener('offline', handleOffline);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
     };
   }, [currentUser]);
+
+  const handleManualSync = async () => {
+    setManualSyncing(true);
+    try {
+      await syncWithServer();
+    } catch {}
+    setTimeout(() => {
+      setManualSyncing(false);
+      setSyncState(getSyncStatus());
+    }, 600);
+  };
 
   const handleCopyCleanLink = () => {
     const cleanUrl = window.location.origin;
@@ -197,6 +242,54 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
 
           {/* Center/Right Actions */}
           <div className="flex items-center gap-2 sm:gap-2.5">
+            {/* 0. Server Sync Status Indicator (متصل / غير متصل) */}
+            <button
+              onClick={handleManualSync}
+              type="button"
+              className={`flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all shadow-2xs border cursor-pointer active:scale-95 ${
+                manualSyncing || syncState.status === 'syncing'
+                  ? 'bg-sky-50 text-sky-800 border-sky-300'
+                  : syncState.status === 'connected'
+                  ? 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 border-emerald-300'
+                  : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300'
+              }`}
+              title={
+                syncState.status === 'connected'
+                  ? 'حالة المزامنة: متصل بالخادم المركزي (انقر للتحديث الفوري)'
+                  : syncState.status === 'syncing' || manualSyncing
+                  ? 'جارٍ مزامنة البيانات مع الخادم...'
+                  : 'حالة المزامنة: غير متصل بالخادم (انقر لإعادة المحاولة)'
+              }
+            >
+              {manualSyncing || syncState.status === 'syncing' ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 text-sky-600 animate-spin shrink-0" />
+                  <span className="hidden sm:inline text-[11px] font-bold text-sky-900">
+                    مزامنة...
+                  </span>
+                </>
+              ) : syncState.status === 'connected' ? (
+                <>
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
+                  </span>
+                  <Wifi className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                  <span className="text-[11px] font-black text-emerald-900">
+                    متصل
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="h-2 w-2 rounded-full bg-rose-600 shrink-0" />
+                  <WifiOff className="w-3.5 h-3.5 text-rose-600 shrink-0" />
+                  <span className="text-[11px] font-black text-rose-800">
+                    غير متصل
+                  </span>
+                </>
+              )}
+            </button>
+
             {/* 1. Notifications Bell Button */}
             <button
               onClick={() => setNotificationsOpen(true)}

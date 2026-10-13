@@ -230,6 +230,12 @@ export function initStorage(): void {
         syncWithServer();
       }
     });
+    window.addEventListener('online', () => {
+      syncWithServer();
+    });
+    window.addEventListener('offline', () => {
+      updateSyncStatus('offline');
+    });
   }
 }
 
@@ -1788,15 +1794,47 @@ export function addPeerExchangeReply(
 
 // ================= المزامنة الشاملة عبر الخادم المركزي (Cross-Device Real-Time Sync) =================
 
+export type SyncStatus = 'connected' | 'syncing' | 'offline';
+
+let currentSyncStatus: SyncStatus =
+  typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'connected';
+let lastSuccessfulSyncTime: number | null = null;
+
+export function getSyncStatus(): { status: SyncStatus; lastSyncTime: number | null } {
+  return {
+    status: currentSyncStatus,
+    lastSyncTime: lastSuccessfulSyncTime,
+  };
+}
+
+export function updateSyncStatus(newStatus: SyncStatus): void {
+  currentSyncStatus = newStatus;
+  if (typeof window !== 'undefined') {
+    window.dispatchEvent(
+      new CustomEvent('sync-status-change', {
+        detail: { status: newStatus, lastSyncTime: lastSuccessfulSyncTime },
+      })
+    );
+  }
+}
+
 let isSyncing = false;
 export async function syncWithServer(): Promise<void> {
-  if (isSyncing || typeof window === 'undefined') return;
+  if (typeof window === 'undefined') return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    updateSyncStatus('offline');
+    return;
+  }
+  if (isSyncing) return;
   isSyncing = true;
+  updateSyncStatus('syncing');
 
   try {
     const syncRes = await fetch('/api/sync');
 
     if (syncRes.ok) {
+      lastSuccessfulSyncTime = Date.now();
+      updateSyncStatus('connected');
       const contentType = syncRes.headers.get('content-type') || '';
       if (!contentType.includes('application/json')) {
         return;
@@ -2002,8 +2040,14 @@ export async function syncWithServer(): Promise<void> {
     }
   } catch (err) {
     console.debug('[Sync] Sync network or transient offline:', err);
+    updateSyncStatus('offline');
   } finally {
     isSyncing = false;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      updateSyncStatus('offline');
+    } else if (lastSuccessfulSyncTime && Date.now() - lastSuccessfulSyncTime < 10000) {
+      updateSyncStatus('connected');
+    }
   }
 }
 
