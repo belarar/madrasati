@@ -60,6 +60,20 @@ const peerCol = collection(firestore, 'peerExchanges');
 const notifsCol = collection(firestore, 'notifications');
 const privateConvCol = collection(firestore, 'private_conversations');
 const privateMsgCol = collection(firestore, 'private_messages');
+const resetRequestsCol = collection(firestore, 'password_reset_requests');
+const staffPinsCol = collection(firestore, 'staff_pins');
+
+export interface FirestorePasswordResetRequest {
+  id: string;
+  identifier: string;
+  staffName: string;
+  staffRank: string;
+  requestedPin: string;
+  requestDate: string;
+  note?: string;
+  status: 'pending' | 'approved' | 'rejected';
+  resolvedAt?: string;
+}
 
 let isInitialized = false;
 
@@ -70,6 +84,8 @@ export function initFirestoreRealtimeSync(callbacks: {
   onSummons: (summons: ParentSummon[]) => void;
   onPeerExchanges: (posts: PeerExchangePost[]) => void;
   onNotifications: (notifs: AppNotification[]) => void;
+  onPasswordResetRequests?: (requests: FirestorePasswordResetRequest[]) => void;
+  onStaffPins?: (pins: Record<string, string>) => void;
 }) {
   if (isInitialized) return;
   isInitialized = true;
@@ -158,6 +174,40 @@ export function initFirestoreRealtimeSync(callbacks: {
     },
     err => console.warn('[Firestore] Notifications subscription error:', err)
   );
+
+  // 6. Password Reset Requests real-time listener (Ensures Director sees requests instantly)
+  if (callbacks.onPasswordResetRequests) {
+    onSnapshot(
+      resetRequestsCol,
+      snapshot => {
+        const requests: FirestorePasswordResetRequest[] = [];
+        snapshot.forEach(d => {
+          requests.push({ ...(d.data() as FirestorePasswordResetRequest), id: d.id });
+        });
+        requests.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+        callbacks.onPasswordResetRequests?.(requests);
+      },
+      err => console.warn('[Firestore] Reset requests subscription warning:', err)
+    );
+  }
+
+  // 7. Staff Pins real-time listener (Ensures employee activation is synchronized everywhere)
+  if (callbacks.onStaffPins) {
+    onSnapshot(
+      staffPinsCol,
+      snapshot => {
+        const pins: Record<string, string> = {};
+        snapshot.forEach(d => {
+          const data = d.data();
+          if (data && typeof data.pin === 'string') {
+            pins[d.id.toLowerCase()] = data.pin;
+          }
+        });
+        callbacks.onStaffPins?.(pins);
+      },
+      err => console.warn('[Firestore] Staff pins subscription warning:', err)
+    );
+  }
 }
 
 // Cloud File Chunking (Support large PDF, Word, and Image files in Cloud Firestore)
@@ -351,6 +401,89 @@ export async function savePeerPostToFirestore(post: PeerExchangePost): Promise<v
 
 export async function deletePeerPostFromFirestore(postId: string): Promise<void> {
   await deleteDoc(doc(firestore, 'peerExchanges', postId));
+}
+
+// ================= Password Reset Requests & Staff Security =================
+export async function savePasswordResetRequestToFirestore(req: FirestorePasswordResetRequest): Promise<void> {
+  try {
+    await setDoc(doc(firestore, 'password_reset_requests', req.id), req);
+    // Send high-priority notification to the Director
+    const notifId = `notif-reset-${req.id}`;
+    await setDoc(doc(firestore, 'notifications', notifId), {
+      id: notifId,
+      type: 'announcement',
+      title: 'طلب تفعيل كلمة سر جديدة 🔑',
+      message: `قام الموظف ${req.staffName} (${req.staffRank}) بطلب تعيين كلمة سر جديدة. يرجى الدخول لحسابك لتفعيلها.`,
+      targetRole: 'director',
+      sourceAuthorName: req.staffName,
+      createdAt: new Date().toISOString(),
+      readBy: [],
+    });
+  } catch (err) {
+    console.warn('[Firestore] Error saving reset request:', err);
+  }
+}
+
+export async function approvePasswordResetRequestInFirestore(req: FirestorePasswordResetRequest): Promise<void> {
+  try {
+    await updateDoc(doc(firestore, 'password_reset_requests', req.id), {
+      status: 'approved',
+      resolvedAt: new Date().toISOString(),
+    });
+    await setDoc(doc(firestore, 'staff_pins', req.identifier.toLowerCase()), {
+      identifier: req.identifier,
+      pin: req.requestedPin,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[Firestore] Error approving reset request:', err);
+  }
+}
+
+export async function rejectPasswordResetRequestInFirestore(requestId: string): Promise<void> {
+  try {
+    await updateDoc(doc(firestore, 'password_reset_requests', requestId), {
+      status: 'rejected',
+      resolvedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[Firestore] Error rejecting reset request:', err);
+  }
+}
+
+export async function deletePasswordResetRequestFromFirestore(requestId: string): Promise<void> {
+  try {
+    await deleteDoc(doc(firestore, 'password_reset_requests', requestId));
+  } catch (err) {
+    console.warn('[Firestore] Error deleting reset request:', err);
+  }
+}
+
+export async function fetchPasswordResetRequestsFromFirestore(): Promise<FirestorePasswordResetRequest[]> {
+  try {
+    const snapshot = await getDocs(resetRequestsCol);
+    const requests: FirestorePasswordResetRequest[] = [];
+    snapshot.forEach(d => {
+      requests.push({ ...(d.data() as FirestorePasswordResetRequest), id: d.id });
+    });
+    requests.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+    return requests;
+  } catch (err) {
+    console.warn('[Firestore] Error fetching reset requests:', err);
+    return [];
+  }
+}
+
+export async function saveStaffPinToFirestore(identifier: string, pin: string): Promise<void> {
+  try {
+    await setDoc(doc(firestore, 'staff_pins', identifier.toLowerCase()), {
+      identifier,
+      pin,
+      updatedAt: new Date().toISOString(),
+    });
+  } catch (err) {
+    console.warn('[Firestore] Error saving staff pin:', err);
+  }
 }
 
 // ================= Private Student Conversations =================

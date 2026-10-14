@@ -201,6 +201,16 @@
   ],
   "notifications": [
     {
+      "id": "notif-reset-reset-req-1791993370232-ple8g",
+      "type": "announcement",
+      "title": "طلب تفعيل كلمة سر جديدة 🔑",
+      "message": "قام الموظف كيحل عبدالكريم (مشرف رئيسي للتربية) بطلب تعيين كلمة سر جديدة. يرجى الدخول للوحة إدارة الحسابات لتفعيلها.",
+      "targetRole": "director",
+      "sourceAuthorName": "كيحل عبدالكريم",
+      "createdAt": "2026-10-14T15:56:10.232Z",
+      "readBy": []
+    },
+    {
       "id": "notif-pmsg-1791481189300-1101501160038700",
       "type": "private_message",
       "title": "رسالة خاصة جديدة من: عدة عمار فاطمة هاجر",
@@ -381,6 +391,18 @@
       "id": "pmsg-1791481189300",
       "conversationId": "conv-init-sample-2am2",
       "createdAt": "2026-10-08T17:39:49.300Z"
+    }
+  ],
+  "passwordResetRequests": [
+    {
+      "id": "reset-req-1791993370232-ple8g",
+      "identifier": "1098548010401400",
+      "staffName": "كيحل عبدالكريم",
+      "staffRank": "مشرف رئيسي للتربية",
+      "requestedPin": "8899",
+      "requestDate": "2026-10-14T15:56:10.232Z",
+      "note": "تجربة تفعيل كلمة السر",
+      "status": "pending"
     }
   ]
 }

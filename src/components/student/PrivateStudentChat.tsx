@@ -992,8 +992,9 @@ export const PrivateStudentChat: React.FC<PrivateStudentChatProps> = ({ currentU
                         </div>
                         <div>
                           <div className="text-xs font-bold text-slate-900">{c.name}</div>
-                          <div className="text-[10px] text-slate-400">
-                            رقم التعريف: {c.identifier}
+                          <div className="text-[10px] text-emerald-700 font-bold flex items-center gap-1 mt-0.5">
+                            <GraduationCap className="w-3 h-3 text-emerald-600 shrink-0" />
+                            <span>تلميذ(ة) في قسم {studentClassName}</span>
                           </div>
                         </div>
                       </div>

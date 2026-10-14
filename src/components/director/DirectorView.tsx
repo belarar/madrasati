@@ -134,7 +134,16 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     };
 
     window.addEventListener('password-requests-updated', handleReqUpdate);
-    return () => window.removeEventListener('password-requests-updated', handleReqUpdate);
+    const interval = setInterval(() => {
+      fetchPasswordResetRequestsFromServer().then(() => {
+        setPendingResetCount(getPendingResetRequestsCount());
+      });
+    }, 2500);
+
+    return () => {
+      window.removeEventListener('password-requests-updated', handleReqUpdate);
+      clearInterval(interval);
+    };
   }, []);
 
   const filteredAnnouncements = announcements.filter(a => {

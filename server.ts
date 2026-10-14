@@ -239,6 +239,7 @@ app.get('/api/sync', (req, res) => {
     privateMessages: db.privateMessages,
     notifications: db.notifications,
     userCustomPins: db.userCustomPins,
+    passwordResetRequests: db.passwordResetRequests || [],
     serverTime: new Date().toISOString(),
   });
 });
@@ -252,6 +253,7 @@ app.post('/api/sync', (req, res) => {
     clientConvs = [],
     clientMessages = [],
     clientPins = {},
+    clientPasswordResetRequests = [],
   } = req.body || {};
 
   let changed = false;
@@ -329,6 +331,23 @@ app.post('/api/sync', (req, res) => {
     }
   }
 
+  // Merge password reset requests
+  if (Array.isArray(clientPasswordResetRequests)) {
+    if (!Array.isArray(db.passwordResetRequests)) db.passwordResetRequests = [];
+    for (const cReq of clientPasswordResetRequests) {
+      if (cReq && cReq.id) {
+        const existIdx = db.passwordResetRequests.findIndex(r => r.id === cReq.id);
+        if (existIdx === -1) {
+          db.passwordResetRequests.unshift(cReq);
+          changed = true;
+        } else if (cReq.status !== db.passwordResetRequests[existIdx].status && cReq.resolvedAt) {
+          db.passwordResetRequests[existIdx] = { ...db.passwordResetRequests[existIdx], ...cReq };
+          changed = true;
+        }
+      }
+    }
+  }
+
   if (changed) {
     saveDatabase(db);
   }
@@ -342,6 +361,7 @@ app.post('/api/sync', (req, res) => {
     privateMessages: db.privateMessages,
     notifications: db.notifications,
     userCustomPins: db.userCustomPins,
+    passwordResetRequests: db.passwordResetRequests || [],
     serverTime: new Date().toISOString(),
   });
 });
@@ -919,7 +939,7 @@ app.get('/api/password-reset-requests', (req, res) => {
 });
 
 app.post('/api/password-reset-requests', (req, res) => {
-  const { identifier, staffName, staffRank, requestedPin, note } = req.body;
+  const { id, identifier, staffName, staffRank, requestedPin, note, requestDate } = req.body;
   if (!identifier || !requestedPin || requestedPin.trim().length < 4) {
     return res.status(400).json({ error: 'الرقم المهني وكلمة السر (4 خانات على الأقل) مطلوبان.' });
   }
@@ -933,13 +953,14 @@ app.post('/api/password-reset-requests', (req, res) => {
     r => r.identifier.toLowerCase() === cleanId && r.status === 'pending'
   );
 
+  const reqId = id || `reset-req-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
   const requestItem: PasswordResetRequest = {
-    id: `reset-req-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
+    id: reqId,
     identifier: identifier.trim(),
     staffName: staffName ? staffName.trim() : 'أستاذ / موظف',
     staffRank: staffRank ? staffRank.trim() : 'طاقم تربوي',
     requestedPin: requestedPin.trim(),
-    requestDate: new Date().toISOString(),
+    requestDate: requestDate || new Date().toISOString(),
     note: note ? note.trim() : 'طلب استرجاع وتعيين كلمة سر جديدة',
     status: 'pending',
   };
@@ -949,10 +970,27 @@ app.post('/api/password-reset-requests', (req, res) => {
     db.passwordResetRequests[existingPendingIdx] = {
       ...db.passwordResetRequests[existingPendingIdx],
       ...requestItem,
-      id: db.passwordResetRequests[existingPendingIdx].id,
     };
   } else {
     db.passwordResetRequests.unshift(requestItem);
+  }
+
+  // Also push a high-priority notification to the director
+  if (!Array.isArray(db.notifications)) {
+    db.notifications = [];
+  }
+  const notifId = `notif-reset-${requestItem.id}`;
+  if (!db.notifications.some(n => n.id === notifId)) {
+    db.notifications.unshift({
+      id: notifId,
+      type: 'announcement',
+      title: 'طلب تفعيل كلمة سر جديدة 🔑',
+      message: `قام الموظف ${requestItem.staffName} (${requestItem.staffRank}) بطلب تعيين كلمة سر جديدة. يرجى الدخول للوحة إدارة الحسابات لتفعيلها.`,
+      targetRole: 'director',
+      sourceAuthorName: requestItem.staffName,
+      createdAt: new Date().toISOString(),
+      readBy: [],
+    });
   }
 
   saveDatabase(db);

@@ -24,8 +24,10 @@ import {
 import { OFFICIAL_STUDENTS_LIST, toUserProfile } from '../data/officialStudents';
 import { OFFICIAL_STAFF_LIST, toStaffUserProfile } from '../data/officialStaff';
 import {
+  approvePasswordResetRequestInFirestore,
   deleteAnnouncementFromFirestore,
   deleteDocumentFromFirestore,
+  deletePasswordResetRequestFromFirestore,
   deletePeerPostFromFirestore,
   deletePrivateConversationFromFirestore,
   deleteSummonFromFirestore,
@@ -34,11 +36,15 @@ import {
   initFirestoreRealtimeSync,
   initPrivateConversationsSync,
   initPrivateMessagesSync,
+  fetchPasswordResetRequestsFromFirestore,
+  rejectPasswordResetRequestInFirestore,
   saveAnnouncementToFirestore,
   saveDocumentToFirestore,
+  savePasswordResetRequestToFirestore,
   savePeerPostToFirestore,
   savePrivateConversationToFirestore,
   savePrivateMessageToFirestore,
+  saveStaffPinToFirestore,
   saveSummonToFirestore,
   seedInitialFirestoreData,
 } from './firestoreService';
@@ -210,6 +216,35 @@ export function initStorage(): void {
             brandNew.forEach(n => {
               triggerNotificationAlert(n);
             });
+          }
+        }
+      },
+      onPasswordResetRequests: (liveRequests) => {
+        if (Array.isArray(liveRequests)) {
+          const prev = getPasswordResetRequests();
+          const prevStr = JSON.stringify(prev.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
+          const nextStr = JSON.stringify(liveRequests.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
+          if (prevStr !== nextStr) {
+            safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(liveRequests));
+            window.dispatchEvent(new CustomEvent('password-requests-updated'));
+          }
+        }
+      },
+      onStaffPins: (livePins) => {
+        if (livePins && typeof livePins === 'object') {
+          const users = getAllUsers();
+          let changed = false;
+          const updatedUsers = users.map(u => {
+            const customPin = livePins[u.identifier.toLowerCase()];
+            if (customPin && u.pin !== customPin) {
+              changed = true;
+              return { ...u, pin: customPin };
+            }
+            return u;
+          });
+          if (changed) {
+            safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+            window.dispatchEvent(new Event('auth-change'));
           }
         }
       },
@@ -1514,7 +1549,8 @@ export function setStaffMemberPassword(identifier: string, newPin: string): { su
   safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
   window.dispatchEvent(new Event('auth-change'));
 
-  // Sync to backend immediately
+  // Sync to Firestore & backend immediately
+  saveStaffPinToFirestore(cleanId, cleanPin).catch(() => {});
   fetch('/api/users/update-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -1554,18 +1590,45 @@ export function getPasswordResetRequests(): PasswordResetRequest[] {
 }
 
 export async function fetchPasswordResetRequestsFromServer(): Promise<PasswordResetRequest[]> {
+  const mergedMap = new Map<string, PasswordResetRequest>();
+
+  // 1. Load from local cache first
+  const localList = getPasswordResetRequests();
+  localList.forEach(r => mergedMap.set(r.id, r));
+
+  // 2. Fetch from Express backend
   try {
     const res = await fetch('/api/password-reset-requests');
     if (res.ok) {
       const serverList = await res.json();
       if (Array.isArray(serverList)) {
-        safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(serverList));
-        window.dispatchEvent(new CustomEvent('password-requests-updated'));
-        return serverList;
+        serverList.forEach((r: PasswordResetRequest) => {
+          if (r && r.id) {
+            mergedMap.set(r.id, r);
+          }
+        });
       }
     }
   } catch {}
-  return getPasswordResetRequests();
+
+  // 3. Fetch from Firestore (cloud database) for instant cross-device visibility
+  try {
+    const firestoreList = await fetchPasswordResetRequestsFromFirestore();
+    if (Array.isArray(firestoreList)) {
+      firestoreList.forEach(r => {
+        if (r && r.id) {
+          mergedMap.set(r.id, r as PasswordResetRequest);
+        }
+      });
+    }
+  } catch {}
+
+  const merged = Array.from(mergedMap.values());
+  merged.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+
+  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(merged));
+  window.dispatchEvent(new CustomEvent('password-requests-updated'));
+  return merged;
 }
 
 export async function submitPasswordResetRequest(
@@ -1613,7 +1676,7 @@ export async function submitPasswordResetRequest(
     status: 'pending',
   };
 
-  // Save to local storage
+  // 1. Save to local storage immediately
   const currentRequests = getPasswordResetRequests().filter(
     r => !(r.identifier.toLowerCase() === cleanId.toLowerCase() && r.status === 'pending')
   );
@@ -1621,7 +1684,28 @@ export async function submitPasswordResetRequest(
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
   window.dispatchEvent(new CustomEvent('password-requests-updated'));
 
-  // Sync to server backend
+  // 2. Add an in-app notification targeted to the Director
+  try {
+    const notif: AppNotification = {
+      id: `notif-reset-${newRequest.id}`,
+      type: 'announcement',
+      title: 'طلب تفعيل كلمة سر جديدة 🔑',
+      message: `قام الموظف ${newRequest.staffName} (${newRequest.staffRank}) بطلب تعيين كلمة سر جديدة. يرجى الدخول لحسابك لتفعيلها.`,
+      targetRole: 'director',
+      sourceAuthorName: newRequest.staffName,
+      createdAt: new Date().toISOString(),
+      readBy: [],
+    };
+    const curNotifs = getNotifications();
+    curNotifs.unshift(notif);
+    safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(curNotifs));
+    window.dispatchEvent(new CustomEvent('notifications-updated'));
+  } catch {}
+
+  // 3. Save directly to Cloud Firestore (Real-time sync to Director across devices)
+  savePasswordResetRequestToFirestore(newRequest).catch(() => {});
+
+  // 4. Sync to server backend
   try {
     await fetch('/api/password-reset-requests', {
       method: 'POST',
@@ -1650,8 +1734,9 @@ export async function approvePasswordResetRequest(
   target.resolvedAt = new Date().toISOString();
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
 
-  // Directly set the new password in storage and sync to server
+  // Directly set the new password in storage, Firestore and server
   setStaffMemberPassword(target.identifier, target.requestedPin);
+  approvePasswordResetRequestInFirestore(target).catch(() => {});
 
   // Sync approval to server
   try {
@@ -1678,6 +1763,8 @@ export async function rejectPasswordResetRequest(
   target.resolvedAt = new Date().toISOString();
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
 
+  rejectPasswordResetRequestInFirestore(requestId).catch(() => {});
+
   try {
     await fetch(`/api/password-reset-requests/${requestId}/reject`, { method: 'POST' });
   } catch {}
@@ -1694,6 +1781,8 @@ export async function deletePasswordResetRequest(
 ): Promise<{ success: boolean; message: string }> {
   const currentRequests = getPasswordResetRequests().filter(r => r.id !== requestId);
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
+
+  deletePasswordResetRequestFromFirestore(requestId).catch(() => {});
 
   try {
     await fetch(`/api/password-reset-requests/${requestId}`, { method: 'DELETE' });
@@ -2018,6 +2107,17 @@ export async function syncWithServer(): Promise<void> {
         });
         if (changed) {
           safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+        }
+      }
+
+      // 5b. Password Reset Requests Sync
+      if (Array.isArray(data.passwordResetRequests)) {
+        const currentReqs = getPasswordResetRequests();
+        const prevStr = JSON.stringify(currentReqs.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
+        const nextStr = JSON.stringify(data.passwordResetRequests.map((r: any) => ({ id: r.id, status: r.status, pin: r.requestedPin })));
+        if (prevStr !== nextStr) {
+          safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(data.passwordResetRequests));
+          window.dispatchEvent(new CustomEvent('password-requests-updated'));
         }
       }
     }

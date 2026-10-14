@@ -86,7 +86,19 @@ export const StaffAccountsManager: React.FC = () => {
     };
 
     window.addEventListener('password-requests-updated', handleReqUpdate);
-    return () => window.removeEventListener('password-requests-updated', handleReqUpdate);
+    const interval = setInterval(() => {
+      fetchPasswordResetRequestsFromServer().then(data => {
+        if (data) {
+          setResetRequests(data);
+          setStaffList(getOfficialStaffAccountList());
+        }
+      });
+    }, 2500);
+
+    return () => {
+      window.removeEventListener('password-requests-updated', handleReqUpdate);
+      clearInterval(interval);
+    };
   }, []);
 
   const handleApproveRequest = async (reqId: string) => {
@@ -757,12 +769,18 @@ export const StaffAccountsManager: React.FC = () => {
               const isPasswordVisible = showAllPasswords || Boolean(visiblePasswords[staff.identifier]);
               const currentPin = staff.pin;
               const hasPin = Boolean(currentPin && currentPin.trim().length >= 4);
+              const pendingReq = pendingRequests.find(
+                r => r.identifier.toLowerCase() === staff.identifier.toLowerCase()
+              );
 
               return (
                 <div
                   key={staff.identifier}
-                  className="p-4 sm:p-5 hover:bg-slate-50/80 transition-colors flex flex-col md:flex-row md:items-center justify-between gap-4"
+                  className={`p-4 sm:p-5 transition-all ${
+                    pendingReq ? 'bg-amber-50/80 border-r-4 border-r-rose-500 shadow-2xs' : 'hover:bg-slate-50/80'
+                  }`}
                 >
+                  <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                   {/* Left (RTL: Right): Staff Info */}
                   <div className="flex items-start gap-3.5 min-w-0">
                     <div className="w-10 h-10 rounded-2xl bg-emerald-50 border border-emerald-100 flex items-center justify-center text-emerald-800 font-bold text-sm shrink-0">
@@ -912,10 +930,93 @@ export const StaffAccountsManager: React.FC = () => {
                     </div>
                   </div>
                 </div>
-              );
-            })}
-          </div>
-        )}
+
+                {/* Direct Inline Pending Password Reset Banner for this staff member */}
+                {pendingReq && (
+                  <div className="mt-3 p-3.5 bg-gradient-to-r from-amber-500/10 via-rose-500/15 to-amber-500/10 border-2 border-rose-300 rounded-2xl flex flex-col md:flex-row md:items-center justify-between gap-3 animate-fadeIn">
+                    <div className="space-y-1.5">
+                      <div className="flex items-center gap-2">
+                        <span className="p-1 rounded-md bg-rose-600 text-white animate-pulse">
+                          <ShieldAlert className="w-4 h-4" />
+                        </span>
+                        <span className="text-xs font-black text-rose-900">
+                          طلب معلق: هذا الموظف نسي كلمة السر وطلب تعيين كلمة السر الجديدة التالية:
+                        </span>
+                      </div>
+
+                      <div className="flex items-center gap-3 text-xs flex-wrap">
+                        <span className="text-slate-700 font-bold">كلمة السر الجديدة المطلوبة:</span>
+                        <span
+                          className="font-mono font-black text-rose-900 bg-white px-3 py-1 rounded-lg border-2 border-rose-300 text-sm tracking-widest shadow-2xs select-all"
+                          dir="ltr"
+                        >
+                          {visibleReqPasswords[pendingReq.id] ? pendingReq.requestedPin : '••••••••'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleReqPassVisibility(pendingReq.id)}
+                          className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                        >
+                          {visibleReqPasswords[pendingReq.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          <span>{visibleReqPasswords[pendingReq.id] ? 'إخفاء' : 'إظهار كلمة السر وقراءتها'}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={() => {
+                            navigator.clipboard.writeText(pendingReq.requestedPin);
+                            setRequestFeedback({
+                              type: 'success',
+                              message: `تم نسخ كلمة السر الجديدة للموظف (${staff.fullName}) بنجاح!`,
+                            });
+                          }}
+                          className="px-2.5 py-1 rounded-lg bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 text-[11px] font-bold flex items-center gap-1 shadow-2xs transition-all cursor-pointer"
+                        >
+                          <Copy className="w-3.5 h-3.5" />
+                          <span>نسخ</span>
+                        </button>
+
+                        {pendingReq.note && (
+                          <span className="text-[11px] text-slate-600 bg-white/70 px-2 py-0.5 rounded border border-rose-200">
+                            ملاحظة الموظف: {pendingReq.note}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0 pt-2 md:pt-0 border-t md:border-t-0 border-rose-200">
+                      <button
+                        type="button"
+                        disabled={actionLoadingId === pendingReq.id}
+                        onClick={() => handleApproveRequest(pendingReq.id)}
+                        className="px-4 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-black text-xs flex items-center gap-2 shadow-md transition-all cursor-pointer disabled:opacity-50"
+                      >
+                        {actionLoadingId === pendingReq.id ? (
+                          <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        ) : (
+                          <CheckCheck className="w-4 h-4 text-emerald-200" />
+                        )}
+                        <span>الموافقة وتفعيل كلمة السر فوراً</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        disabled={actionLoadingId === pendingReq.id}
+                        onClick={() => handleRejectRequest(pendingReq.id)}
+                        className="px-3 py-2.5 rounded-xl bg-rose-50 hover:bg-rose-100 text-rose-800 border border-rose-200 font-bold text-xs flex items-center gap-1 transition-all cursor-pointer disabled:opacity-50"
+                        title="رفض الطلب لحماية الحساب"
+                      >
+                        <Ban className="w-3.5 h-3.5" />
+                        <span>رفض</span>
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
       </div>
 
       {/* Modal: Set / Reset Staff Password */}
