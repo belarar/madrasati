@@ -7,6 +7,7 @@ import {
   Building,
   Check,
   CheckCircle2,
+  Coins,
   Copy,
   Download,
   GraduationCap,
@@ -166,8 +167,28 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
     }
   };
 
-  const getRoleBadge = (role?: UserRole) => {
-    switch (role) {
+  const getRoleBadge = (user?: UserProfile | null) => {
+    if (!user) {
+      return {
+        label: 'زائر',
+        bg: 'bg-slate-100 text-slate-700 border-slate-300',
+        icon: <User className="w-3.5 h-3.5" />,
+      };
+    }
+
+    if (
+      user.title?.includes('مقتصد') ||
+      user.rank?.includes('مقتصد') ||
+      user.identifier === '1197748280037000'
+    ) {
+      return {
+        label: 'المقتصدة',
+        bg: 'bg-teal-100 text-teal-900 border-teal-400',
+        icon: <Coins className="w-3.5 h-3.5" />,
+      };
+    }
+
+    switch (user.role) {
       case 'student':
         return {
           label: 'تلميذ',
@@ -182,7 +203,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
         };
       case 'censor':
         return {
-          label: 'ناظر المؤسسة',
+          label: 'الناظرة',
           bg: 'bg-teal-100 text-teal-800 border-teal-300',
           icon: <Shield className="w-3.5 h-3.5" />,
         };
@@ -194,14 +215,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
         };
       default:
         return {
-          label: 'زائر',
+          label: user.title || 'طاقم المؤسسة',
           bg: 'bg-slate-100 text-slate-700 border-slate-300',
           icon: <User className="w-3.5 h-3.5" />,
         };
     }
   };
 
-  const roleInfo = getRoleBadge(currentUser?.role);
+  const roleInfo = getRoleBadge(currentUser);
 
   const handleLogout = () => {
     setCurrentUser(null);

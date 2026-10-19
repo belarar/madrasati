@@ -23,10 +23,12 @@ import {
   Share2,
   Sparkles,
   User,
+  UserCheck,
   Users,
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SUBJECTS } from '../../data/mockData';
+import { getTeachersForClass, isTeacherAssignedToClass } from '../../data/officialStaff';
 import {
   getPeerExchanges,
   getPrivateConversations,
@@ -64,9 +66,12 @@ export const StudentView: React.FC<StudentViewProps> = ({
 }) => {
   const [selectedSubject, setSelectedSubject] = useState<SubjectId | 'ALL'>('ALL');
   const [selectedType, setSelectedType] = useState<string>('ALL');
+  const [selectedTeacherId, setSelectedTeacherId] = useState<string>('ALL');
   const [scopeFilter, setScopeFilter] = useState<'all_school' | 'my_class'>('all_school');
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'documents' | 'private_chat' | 'peer_exchange' | 'announcements' | 'summons'>('documents');
+  const [activeTab, setActiveTab] = useState<
+    'documents' | 'my_teachers' | 'private_chat' | 'peer_exchange' | 'announcements' | 'summons'
+  >('documents');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [selectedSummon, setSelectedSummon] = useState<ParentSummon | null>(null);
   const [conversationsCount, setConversationsCount] = useState(() =>
@@ -124,6 +129,11 @@ export const StudentView: React.FC<StudentViewProps> = ({
   // Filter documents meant for this student's class or "ALL"
   const studentClassId = currentUser.classId || '4AM-1';
 
+  // قائمة الأساتذة الرسميين المسندين لقسم هذا التلميذ وفق جدول التوقيت العام
+  const classTeachers = useMemo(() => {
+    return getTeachersForClass(studentClassId);
+  }, [studentClassId]);
+
   // Count documents targeted to student's class or level
   const myClassDocsCount = useMemo(() => {
     const studentLevel = studentClassId.split('-')[0];
@@ -147,6 +157,30 @@ export const StudentView: React.FC<StudentViewProps> = ({
       // Check Target Audience
       if (doc.targetAudience === 'teachers' || doc.targetAudience === 'staff') {
         return false;
+      }
+
+      // إسناد وتدريس حصري: التلميذ يتلقى دروس وفروض فقط من أستاذه المسند لقسمه في جدول التوقيت العام
+      const isTeacherDoc = doc.authorRole === 'teacher' || (!doc.authorRole && doc.subject !== 'admin');
+      if (isTeacherDoc) {
+        const assigned = isTeacherAssignedToClass(doc.authorId || doc.authorName, studentClassId);
+        if (!assigned) {
+          return false;
+        }
+
+        // التأكد من أن الوثيقة موجهة لقسم هذا التلميذ تحديداً
+        const targetClasses = Array.isArray(doc.targetClasses) ? doc.targetClasses : [];
+        if (targetClasses.length > 0 && !targetClasses.includes('ALL') && !targetClasses.includes(studentClassId)) {
+          return false;
+        }
+      }
+
+      // تصفية بحسب الأستاذ المحدد (إذا تم اختياره)
+      if (selectedTeacherId !== 'ALL') {
+        const authorMatch =
+          doc.authorId?.includes(selectedTeacherId) ||
+          doc.authorName?.toLowerCase().includes(selectedTeacherId.toLowerCase()) ||
+          selectedTeacherId.toLowerCase().includes(doc.authorName?.toLowerCase() || '');
+        if (!authorMatch) return false;
       }
 
       const targetClasses = Array.isArray(doc.targetClasses) ? doc.targetClasses : ['ALL'];
@@ -193,7 +227,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
 
       return true;
     });
-  }, [documents, scopeFilter, studentClassId, currentUser.className, currentUser.identifier, currentUser.name, selectedSubject, selectedType, searchQuery]);
+  }, [documents, scopeFilter, studentClassId, currentUser.className, currentUser.identifier, currentUser.name, selectedSubject, selectedType, selectedTeacherId, searchQuery]);
 
   // Announcements targeted to students or all
   const studentAnnouncements = useMemo(() => {
@@ -363,6 +397,18 @@ export const StudentView: React.FC<StudentViewProps> = ({
           </button>
 
           <button
+            onClick={() => setActiveTab('my_teachers')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all ${
+              activeTab === 'my_teachers'
+                ? 'bg-emerald-700 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <UserCheck className="w-4 h-4 text-emerald-600" />
+            <span>أساتذة قسمي المعتمدون ({classTeachers.length})</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('private_chat')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all relative ${
               activeTab === 'private_chat'
@@ -427,6 +473,35 @@ export const StudentView: React.FC<StudentViewProps> = ({
       {/* View: Documents */}
       {activeTab === 'documents' && (
         <div className="space-y-6">
+          {/* Official Class Teachers Guidance Banner */}
+          <div className="bg-gradient-to-r from-emerald-50 via-teal-50 to-slate-50 border border-emerald-200 p-4 sm:p-5 rounded-2xl flex flex-col md:flex-row items-start md:items-center justify-between gap-4 shadow-2xs">
+            <div className="flex items-center gap-3">
+              <div className="w-11 h-11 rounded-2xl bg-emerald-800 text-white flex items-center justify-center shrink-0 shadow-sm">
+                <CheckCircle2 className="w-6 h-6 text-yellow-300" />
+              </div>
+              <div>
+                <h4 className="text-sm sm:text-base font-bold text-slate-900 flex items-center gap-2 flex-wrap">
+                  <span>جدول خدمات أساتذة قسمك ({currentUser.className || studentClassId})</span>
+                  <span className="text-[11px] bg-emerald-200 text-emerald-950 px-2.5 py-0.5 rounded-full font-bold">
+                    معتمد رسمياً ({classTeachers.length} أستاذ)
+                  </span>
+                </h4>
+                <p className="text-xs text-slate-600 mt-0.5">
+                  تطبيقاً للنظام التربوي، أنت تتلقى الدروس والفروض حصرياً من أساتذة قسمك المسندين في جدول توقيت المؤسسة.
+                </p>
+              </div>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('my_teachers')}
+              className="px-4 py-2.5 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white text-xs font-bold transition-all shrink-0 shadow-xs flex items-center gap-2 cursor-pointer active:scale-95"
+            >
+              <UserCheck className="w-4 h-4 text-yellow-300" />
+              <span>دليل وبطاقات أساتذة قسمي</span>
+            </button>
+          </div>
+
           {/* Search & Filters Bar */}
           <div className="bg-white p-4 sm:p-5 rounded-2xl border border-slate-200 shadow-xs space-y-4">
             {/* Search Input */}
@@ -539,6 +614,45 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 </button>
               ))}
             </div>
+
+            {/* Teacher Specific Filter */}
+            <div className="flex items-center gap-2 overflow-x-auto pb-1 pt-2 border-t border-slate-100 text-xs">
+              <span className="font-semibold text-slate-500 shrink-0 ml-1 flex items-center gap-1">
+                <UserCheck className="w-3.5 h-3.5 text-emerald-700" />
+                <span>أستاذ(ة) المادة:</span>
+              </span>
+
+              <button
+                type="button"
+                onClick={() => setSelectedTeacherId('ALL')}
+                className={`px-2.5 py-1 rounded-lg shrink-0 font-medium transition-all ${
+                  selectedTeacherId === 'ALL'
+                    ? 'bg-emerald-800 text-white font-bold shadow-2xs'
+                    : 'bg-slate-50 text-slate-600 hover:bg-slate-100 border border-slate-200/60'
+                }`}
+              >
+                كافة أساتذة القسم ({classTeachers.length})
+              </button>
+
+              {classTeachers.map(t => {
+                const isSelected = selectedTeacherId === t.teacherName;
+                return (
+                  <button
+                    key={t.teacherIdentifier}
+                    type="button"
+                    onClick={() => setSelectedTeacherId(isSelected ? 'ALL' : t.teacherName)}
+                    className={`px-2.5 py-1 rounded-lg shrink-0 font-medium transition-all flex items-center gap-1.5 ${
+                      isSelected
+                        ? 'bg-emerald-800 text-white font-bold shadow-2xs'
+                        : 'bg-slate-50 text-slate-700 hover:bg-slate-100 border border-slate-200/60'
+                    }`}
+                  >
+                    <span>{t.teacherName}</span>
+                    <span className="text-[10px] opacity-75 font-normal">({t.subjectName})</span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
 
           {/* Documents Grid */}
@@ -591,6 +705,114 @@ export const StudentView: React.FC<StudentViewProps> = ({
               ))}
             </div>
           )}
+        </div>
+      )}
+
+      {/* View: My Class Teachers (أساتذة قسمي المعتمدون رسمياً) */}
+      {activeTab === 'my_teachers' && (
+        <div className="space-y-6 animate-in fade-in">
+          {/* Institutional Header Banner */}
+          <div className="bg-white p-6 rounded-3xl border border-slate-200 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="space-y-1">
+              <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-emerald-100 text-emerald-900 border border-emerald-300 text-xs font-bold">
+                <CheckCircle2 className="w-3.5 h-3.5 text-emerald-700" />
+                <span>جدول خدمات الأساتذة المعتمد رسمياً • متوسطة الشهيد بن نعمة مصطفى</span>
+              </div>
+              <h2 className="text-xl sm:text-2xl font-black text-slate-900">
+                أساتذة قسم {currentUser.className || studentClassId} ({classTeachers.length} أستاذ)
+              </h2>
+              <p className="text-xs sm:text-sm text-slate-600 max-w-2xl leading-relaxed">
+                قائمة الأساتذة المسندين لقسمك بموجب جدول التوقيت العام المعتمد. نظام المؤسسة يضمن تلقيك للدروس والفروض والاختبارات حصرياً من أساتذتك الرسميين.
+              </p>
+            </div>
+
+            <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-4 text-center shrink-0">
+              <span className="text-xs text-emerald-800 font-bold block mb-0.5">قسمك الدراسي</span>
+              <span className="text-xl font-black text-emerald-950">{currentUser.className || studentClassId}</span>
+            </div>
+          </div>
+
+          {/* Teachers Cards Grid */}
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 sm:gap-5">
+            {classTeachers.map(teacher => {
+              const teacherDocsCount = documents.filter(
+                d =>
+                  (d.authorId?.includes(teacher.teacherIdentifier) ||
+                    d.authorName.includes(teacher.teacherName)) &&
+                  (d.targetClasses?.includes(studentClassId) || d.targetClasses?.includes('ALL'))
+              ).length;
+
+              return (
+                <div
+                  key={teacher.teacherIdentifier}
+                  className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md transition-all flex flex-col justify-between space-y-4 group"
+                >
+                  <div className="space-y-3">
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform shadow-2xs">
+                        <User className="w-6 h-6" />
+                      </div>
+                      <span className="px-3 py-1 rounded-full bg-emerald-50 border border-emerald-300 text-emerald-800 font-bold text-xs">
+                        {teacher.subjectName}
+                      </span>
+                    </div>
+
+                    <div>
+                      <h3 className="text-base sm:text-lg font-black text-slate-900 group-hover:text-emerald-800 transition-colors">
+                        الأستاذ(ة): {teacher.teacherName}
+                      </h3>
+                      <p className="text-xs text-slate-500 font-medium mt-0.5">
+                        {teacher.rank}
+                      </p>
+                    </div>
+
+                    <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200/80 space-y-1.5 text-xs">
+                      <div className="flex items-center justify-between text-slate-600">
+                        <span>المادة المقررة:</span>
+                        <strong className="text-slate-900 font-bold">{teacher.subjectName}</strong>
+                      </div>
+                      <div className="flex items-center justify-between text-slate-600">
+                        <span>الوثائق المنشورة لقسمك:</span>
+                        <strong className="text-emerald-700 font-bold">{teacherDocsCount} وثيقة</strong>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-1.5 text-[11px] font-bold text-emerald-700 bg-emerald-50/70 p-2 rounded-xl border border-emerald-200/60">
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600 shrink-0" />
+                      <span>أستاذ معتمد رسمياً لتدريس هذا القسم</span>
+                    </div>
+                  </div>
+
+                  <div className="pt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedTeacherId(teacher.teacherName);
+                        setActiveTab('documents');
+                      }}
+                      className="flex-1 py-2.5 px-3 rounded-xl bg-emerald-800 hover:bg-emerald-900 text-white font-bold text-xs transition-colors flex items-center justify-center gap-1.5 shadow-2xs cursor-pointer active:scale-95"
+                    >
+                      <BookOpen className="w-3.5 h-3.5" />
+                      <span>عرض دروس الأستاذ</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedSubject(teacher.subjectId);
+                        setSelectedTeacherId(teacher.teacherName);
+                        setActiveTab('documents');
+                      }}
+                      className="py-2.5 px-3 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs transition-colors cursor-pointer"
+                      title={`تصفية بمادة ${teacher.subjectName}`}
+                    >
+                      المادة
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         </div>
       )}
 

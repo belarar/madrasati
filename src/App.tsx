@@ -10,6 +10,7 @@ import {
   Building,
   Check,
   CheckCircle2,
+  Coins,
   Copy,
   Download,
   FileCheck,
@@ -24,6 +25,7 @@ import {
   Sparkles,
   User,
   Users,
+  Wrench,
 } from 'lucide-react';
 import { LoginModal } from './components/LoginModal';
 import { MobileBottomNav } from './components/MobileBottomNav';
@@ -33,6 +35,7 @@ import { DocumentPreviewModal } from './components/common/DocumentPreviewModal';
 import { NotificationToast } from './components/common/NotificationToast';
 import { NotificationsModal } from './components/common/NotificationsModal';
 import { PwaInstallModal } from './components/common/PwaInstallModal';
+import { BursarView } from './components/bursar/BursarView';
 import { CensorView } from './components/censor/CensorView';
 import { DirectorView } from './components/director/DirectorView';
 import { StudentView } from './components/student/StudentView';
@@ -169,7 +172,23 @@ export default function App() {
               />
             )}
 
-            {(currentUser.role === 'censor' || currentUser.role === 'staff') && (
+            {/* Bursar Space (المصالح الاقتصادية والمقتصدة - إدارة واستدعاء العمال المهنيين) */}
+            {currentUser.role === 'staff' &&
+              (currentUser.title?.includes('مقتصد') ||
+                currentUser.rank?.includes('مقتصد') ||
+                currentUser.identifier === '1197748280037000') && (
+                <BursarView
+                  currentUser={currentUser}
+                  onRefreshData={refreshAllData}
+                />
+              )}
+
+            {/* Censor Space (الناظرة - مسؤولة عن مشرفي التربية والتلاميذ) */}
+            {(currentUser.role === 'censor' ||
+              (currentUser.role === 'staff' &&
+                !currentUser.title?.includes('مقتصد') &&
+                !currentUser.rank?.includes('مقتصد') &&
+                currentUser.identifier !== '1197748280037000')) && (
               <CensorView
                 currentUser={currentUser}
                 announcements={announcements}
@@ -260,7 +279,7 @@ export default function App() {
             </div>
 
             {/* Role Gateways Cards */}
-            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5 gap-4">
               {/* Director Card */}
               <div
                 onClick={() => setLoginModalOpen(true)}
@@ -269,56 +288,12 @@ export default function App() {
                 <div className="w-12 h-12 rounded-2xl bg-purple-100 text-purple-700 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <Building className="w-6 h-6" />
                 </div>
-                <h3 className="font-bold text-slate-900 text-lg mb-1">فضاء السيد المدير</h3>
+                <h3 className="font-bold text-slate-900 text-base mb-1">فضاء السيد المدير</h3>
                 <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                  الدخول بالرقم المهني الرسمي وكلمة السر الخاصة بإدارة المؤسسة.
+                  الإشراف العام على المؤسسة، تفعيل حسابات الأساتذة، ومصادقة استعادة كلمات السر.
                 </p>
                 <div className="text-xs font-bold text-purple-700 flex items-center gap-1">
-                  <span>تسجيل الدخول كمدير</span>
-                  <ArrowRight className="w-3.5 h-3.5" />
-                </div>
-              </div>
-
-              {/* Student Card */}
-              <div
-                onClick={() => setLoginModalOpen(true)}
-                className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-emerald-500 cursor-pointer transition-all group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <GraduationCap className="w-6 h-6" />
-                </div>
-                <h3 className="font-bold text-slate-900 text-lg mb-1">فضاء التلاميذ</h3>
-                <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                  الدخول برقم التعريف المدرسي الخاص (16 رقماً) مع اللقب والاسم معاً لضمان أمان الحساب ومنع دخول أي زميل آخر.
-                </p>
-                <div
-                  style={{
-                    backgroundColor: '#064e3b',
-                    color: '#fef08a',
-                    borderColor: '#10b981',
-                  }}
-                  className="inline-flex items-center gap-2 px-4 py-2.5 rounded-xl bg-emerald-900 text-yellow-300 text-xs font-black shadow-md border-2 border-emerald-500 group-hover:bg-emerald-950 transition-colors"
-                >
-                  <GraduationCap className="w-4 h-4 text-yellow-300" />
-                  <span style={{ color: '#fef08a', fontWeight: 900 }}>دخول فضاء التلميذ الآن</span>
-                  <ArrowRight className="w-3.5 h-3.5 text-yellow-300 rtl:rotate-180" />
-                </div>
-              </div>
-
-              {/* Teacher Card */}
-              <div
-                onClick={() => setLoginModalOpen(true)}
-                className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-blue-500 cursor-pointer transition-all group"
-              >
-                <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
-                  <User className="w-6 h-6" />
-                </div>
-                <h3 className="font-bold text-slate-900 text-lg mb-1">فضاء الأساتذة</h3>
-                <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                  الدخول بالرقم المهني والاسم والمادة لإرسال وثائق وفروض Word و PDF للأقسام.
-                </p>
-                <div className="text-xs font-bold text-blue-700 flex items-center gap-1">
-                  <span>دخول الأستاذ</span>
+                  <span>دخول المدير</span>
                   <ArrowRight className="w-3.5 h-3.5" />
                 </div>
               </div>
@@ -331,13 +306,75 @@ export default function App() {
                 <div className="w-12 h-12 rounded-2xl bg-teal-100 text-teal-700 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
                   <Shield className="w-6 h-6" />
                 </div>
-                <h3 className="font-bold text-slate-900 text-lg mb-1">مكتب الناظر</h3>
+                <h3 className="font-bold text-slate-900 text-base mb-1">مكتب السيدة الناظرة</h3>
                 <p className="text-xs text-slate-500 leading-relaxed mb-3">
-                  نشر إعلانات التلاميذ وإرسال استدعاءات الأولياء الرسمية مباشرة عبر تطبيق واتساب.
+                  مسؤولة عن <strong>مشرفي التربية (3 مشرفين)</strong> واستدعائهم، وتنظيم شؤون واستدعاءات أولياء التلاميذ.
                 </p>
                 <div className="text-xs font-bold text-teal-700 flex items-center gap-1">
-                  <span>دخول الناظر</span>
+                  <span>دخول الناظرة</span>
                   <ArrowRight className="w-3.5 h-3.5" />
+                </div>
+              </div>
+
+              {/* Bursar Card */}
+              <div
+                onClick={() => setLoginModalOpen(true)}
+                className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-emerald-600 cursor-pointer transition-all group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-800 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <Coins className="w-6 h-6" />
+                </div>
+                <h3 className="font-bold text-slate-900 text-base mb-1">المصالح الاقتصادية</h3>
+                <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                  مسؤولة عن <strong>العمال المهنيين (10 عمال)</strong>، استدعاؤهم وتكليفهم بمهام الصيانة والنظافة.
+                </p>
+                <div className="text-xs font-bold text-emerald-800 flex items-center gap-1">
+                  <span>دخول المقتصدة</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </div>
+              </div>
+
+              {/* Teacher Card */}
+              <div
+                onClick={() => setLoginModalOpen(true)}
+                className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-blue-500 cursor-pointer transition-all group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-blue-100 text-blue-700 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <User className="w-6 h-6" />
+                </div>
+                <h3 className="font-bold text-slate-900 text-base mb-1">فضاء الأساتذة</h3>
+                <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                  إسناد حصري للأقسام الرسمية ونشر الدروس والفروض الموجهة لتلاميذ أقسام الأستاذ فقط.
+                </p>
+                <div className="text-xs font-bold text-blue-700 flex items-center gap-1">
+                  <span>دخول الأستاذ</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
+                </div>
+              </div>
+
+              {/* Student Card */}
+              <div
+                onClick={() => setLoginModalOpen(true)}
+                className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs hover:shadow-md hover:border-emerald-500 cursor-pointer transition-all group"
+              >
+                <div className="w-12 h-12 rounded-2xl bg-emerald-100 text-emerald-700 flex items-center justify-center mb-4 group-hover:scale-110 transition-transform">
+                  <GraduationCap className="w-6 h-6" />
+                </div>
+                <h3 className="font-bold text-slate-900 text-base mb-1">فضاء التلاميذ</h3>
+                <p className="text-xs text-slate-500 leading-relaxed mb-3">
+                  تلقي الدروس والفروض حصرياً من أساتذة القسم المعتمدين والمحادثة الآمنة مع الزملاء.
+                </p>
+                <div
+                  style={{
+                    backgroundColor: '#064e3b',
+                    color: '#fef08a',
+                    borderColor: '#10b981',
+                  }}
+                  className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-emerald-900 text-yellow-300 text-[11px] font-black shadow-xs border border-emerald-500 group-hover:bg-emerald-950 transition-colors"
+                >
+                  <GraduationCap className="w-3.5 h-3.5 text-yellow-300" />
+                  <span>دخول التلميذ</span>
+                  <ArrowRight className="w-3 h-3 text-yellow-300 rtl:rotate-180" />
                 </div>
               </div>
             </div>

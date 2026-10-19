@@ -20,6 +20,7 @@ import {
   SubjectId,
   UserProfile,
   UserRole,
+  InternalStaffSummon,
 } from '../types';
 import { OFFICIAL_STUDENTS_LIST, toUserProfile } from '../data/officialStudents';
 import { OFFICIAL_STAFF_LIST, toStaffUserProfile } from '../data/officialStaff';
@@ -56,6 +57,7 @@ export const STORAGE_KEYS = {
   DOCUMENTS: 'ben_naama_documents',
   ANNOUNCEMENTS: 'ben_naama_announcements',
   SUMMONS: 'ben_naama_summons',
+  INTERNAL_STAFF_SUMMONS: 'ben_naama_internal_staff_summons',
   USERS: 'ben_naama_users',
   PEER_EXCHANGES: 'ben_naama_peer_exchanges',
   NOTIFICATIONS: 'ben_naama_notifications',
@@ -1173,6 +1175,87 @@ export function updateSummonStatus(summonId: string, status: ParentSummon['statu
     method: 'PATCH',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ status }),
+  }).catch(() => {});
+}
+
+// ================= استدعاءات وتكليفات الطاقم الداخلي (العمال المهنيون والمشرفون) =================
+export function getInternalStaffSummons(): InternalStaffSummon[] {
+  try {
+    if (typeof window !== 'undefined') {
+      const raw = localStorage.getItem(STORAGE_KEYS.INTERNAL_STAFF_SUMMONS);
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed)) return parsed;
+      }
+    }
+  } catch (err) {
+    console.error('Failed to get internal staff summons:', err);
+  }
+  return [];
+}
+
+export function saveInternalStaffSummon(
+  summon: Omit<InternalStaffSummon, 'id' | 'issuedAt' | 'status'>
+): InternalStaffSummon {
+  const currentList = getInternalStaffSummons();
+  const newSummon: InternalStaffSummon = {
+    ...summon,
+    id: 'int-sum-' + Date.now(),
+    issuedAt: new Date().toISOString(),
+    status: 'pending',
+  };
+
+  const updated = [newSummon, ...currentList.filter(s => s.id !== newSummon.id)];
+  safeSetItem(STORAGE_KEYS.INTERNAL_STAFF_SUMMONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('internal-staff-summons-change'));
+
+  // Notification for staff
+  addNotificationLocally({
+    id: 'notif-staff-sum-' + Date.now(),
+    type: 'summon',
+    title: `استدعاء / تكليف بمهمة: ${newSummon.targetStaffName}`,
+    message: `${newSummon.issuerName} قامت بإصدار استدعاء/تكليف بمهمة: "${newSummon.reason}" بتاريخ ${newSummon.appointmentDate} (${newSummon.appointmentTime}).`,
+    targetRole: 'staff',
+    targetUserId: newSummon.targetStaffIdentifier,
+    sourceAuthorName: newSummon.issuerName,
+    createdAt: new Date().toISOString(),
+    readBy: [],
+  }, true);
+
+  // Sync to server
+  fetch('/api/internal-summons', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(newSummon),
+  }).catch(() => {});
+
+  return newSummon;
+}
+
+export function updateInternalStaffSummonStatus(
+  summonId: string,
+  status: InternalStaffSummon['status']
+): void {
+  const currentList = getInternalStaffSummons();
+  const updated = currentList.map(s => (s.id === summonId ? { ...s, status } : s));
+  safeSetItem(STORAGE_KEYS.INTERNAL_STAFF_SUMMONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('internal-staff-summons-change'));
+
+  fetch('/api/internal-summons/' + encodeURIComponent(summonId), {
+    method: 'PATCH',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ status }),
+  }).catch(() => {});
+}
+
+export function deleteInternalStaffSummon(summonId: string): void {
+  const currentList = getInternalStaffSummons();
+  const updated = currentList.filter(s => s.id !== summonId);
+  safeSetItem(STORAGE_KEYS.INTERNAL_STAFF_SUMMONS, JSON.stringify(updated));
+  window.dispatchEvent(new Event('internal-staff-summons-change'));
+
+  fetch('/api/internal-summons/' + encodeURIComponent(summonId), {
+    method: 'DELETE',
   }).catch(() => {});
 }
 

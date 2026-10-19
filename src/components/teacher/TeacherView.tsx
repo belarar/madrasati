@@ -1,4 +1,4 @@
-import React, { useRef, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   AlertCircle,
   Bell,
@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react';
 import { SCHOOL_CLASSES, SUBJECTS } from '../../data/mockData';
+import { getTeacherAssignedClasses } from '../../data/officialStaff';
 import {
   deleteAnnouncement,
   deleteDocument,
@@ -71,10 +72,28 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   const [subject, setSubject] = useState<SubjectId>(currentUser.subjects?.[0] || 'math');
   const [docType, setDocType] = useState<DocType>('lesson');
   const [fileFormat, setFileFormat] = useState<FileFormat>('pdf');
-  const [targetClasses, setTargetClasses] = useState<string[]>(
-    currentUser.assignedClasses || ['4AM-1']
-  );
-  const [selectAllClasses, setSelectAllClasses] = useState(true);
+  
+  // الأقسام المسندة للأستاذ حصرياً وفق جدول التوقيت العام المعتمد
+  const teacherAssignedClassIds = useMemo(() => {
+    const list =
+      currentUser.assignedClasses && currentUser.assignedClasses.length > 0
+        ? currentUser.assignedClasses
+        : getTeacherAssignedClasses(currentUser.identifier);
+    return list && list.length > 0 ? list : ['4AM-1'];
+  }, [currentUser.assignedClasses, currentUser.identifier]);
+
+  const teacherClasses = useMemo(() => {
+    return SCHOOL_CLASSES.filter(c => teacherAssignedClassIds.includes(c.id));
+  }, [teacherAssignedClassIds]);
+
+  const [targetClasses, setTargetClasses] = useState<string[]>(() => {
+    const list =
+      currentUser.assignedClasses && currentUser.assignedClasses.length > 0
+        ? currentUser.assignedClasses
+        : getTeacherAssignedClasses(currentUser.identifier);
+    return list && list.length > 0 ? list : ['4AM-1'];
+  });
+  const [selectAllClasses, setSelectAllClasses] = useState(false);
   const [uploadedFile, setUploadedFile] = useState<{
     name: string;
     size: string;
@@ -214,6 +233,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   };
 
   const handleClassToggle = (classId: string) => {
+    if (!teacherAssignedClassIds.includes(classId)) return;
     if (selectAllClasses) {
       setSelectAllClasses(false);
       setTargetClasses([classId]);
@@ -232,10 +252,10 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
   const handleSelectAllToggle = () => {
     if (selectAllClasses) {
       setSelectAllClasses(false);
-      setTargetClasses(currentUser.assignedClasses || ['4AM-1']);
+      setTargetClasses([teacherAssignedClassIds[0] || '4AM-1']);
     } else {
       setSelectAllClasses(true);
-      setTargetClasses(SCHOOL_CLASSES.map(c => c.id));
+      setTargetClasses([...teacherAssignedClassIds]);
     }
   };
 
@@ -282,11 +302,14 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
 
     setIsSubmitting(true);
 
-    const docTargetClasses = selectAllClasses
-      ? ['ALL']
-      : targetClasses.length > 0
-        ? targetClasses
-        : ['ALL'];
+    const effectiveTargetClasses = selectAllClasses
+      ? teacherAssignedClassIds
+      : targetClasses.filter(c => teacherAssignedClassIds.includes(c));
+
+    const docTargetClasses =
+      effectiveTargetClasses.length > 0
+        ? effectiveTargetClasses
+        : (teacherAssignedClassIds.length > 0 ? teacherAssignedClassIds : ['4AM-1']);
 
     const fileName =
       uploadedFile?.name ||
@@ -308,8 +331,8 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
       authorName: currentUser.name,
       authorRole: 'teacher',
       targetClasses: docTargetClasses,
-      targetAudience: selectAllClasses || docTargetClasses.includes('ALL') ? 'all_students' : 'specific_class',
-      targetLevel: docTargetClasses.includes('ALL') ? undefined : (docTargetClasses[0]?.split('-')[0] as EducationLevel),
+      targetAudience: 'specific_class',
+      targetLevel: (docTargetClasses[0]?.split('-')[0] as EducationLevel) || '4AM',
     });
 
     // Immediate server sync
@@ -536,26 +559,19 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
                       : 'bg-white text-slate-700 border-slate-300 hover:bg-slate-100'
                   }`}
                 >
-                  {selectAllClasses ? 'إلغاء تحديد الكل' : 'تحديد جميع الأقسام'}
+                  {selectAllClasses ? 'إلغاء تحديد الكل' : 'تحديد كافة أقسامك المسندة'}
                 </button>
               </div>
 
-              {selectAllClasses ? (
-                <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-xs font-bold text-emerald-900 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
-                  <span>📢 الوثيقة ستصل إلى: جميع تلميذات وتلاميذ المؤسسة (كافة الأقسام والمستويات)</span>
-                </div>
-              ) : (
-                <div className="p-2.5 rounded-xl bg-blue-50 border border-blue-300 text-xs font-bold text-blue-900 flex items-center gap-2">
-                  <CheckCircle2 className="w-4 h-4 text-blue-700 shrink-0" />
-                  <span>
-                    📢 الوثيقة ستصل حصراً إلى الأقسام المحددة ({targetClasses.length} قسم: {targetClasses.join('، ')})
-                  </span>
-                </div>
-              )}
+              <div className="p-2.5 rounded-xl bg-emerald-50 border border-emerald-300 text-xs font-bold text-emerald-900 flex items-center gap-2">
+                <CheckCircle2 className="w-4 h-4 text-emerald-700 shrink-0" />
+                <span>
+                  📢 الوثيقة ستصل حصراً إلى أقسامك المسندة وفق جدول التوقيت العام ({targetClasses.length} قسم: {targetClasses.join('، ')})
+                </span>
+              </div>
 
               <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 pt-1">
-                {SCHOOL_CLASSES.map(cls => {
+                {teacherClasses.map(cls => {
                   const isChecked = selectAllClasses || targetClasses.includes(cls.id);
                   return (
                     <button

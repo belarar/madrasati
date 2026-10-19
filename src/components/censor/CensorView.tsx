@@ -1,9 +1,10 @@
-import React, { useRef, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   AlertCircle,
   Bell,
   Calendar,
   CheckCircle,
+  CheckCircle2,
   Clock,
   ExternalLink,
   Eye,
@@ -19,23 +20,33 @@ import {
   Search,
   Send,
   Shield,
+  Sparkles,
   Trash2,
   Upload,
   User,
+  UserCheck,
   Users,
+  Wrench,
+  X,
 } from 'lucide-react';
 import { MOCK_USERS, SCHOOL_CLASSES, SCHOOL_NAME } from '../../data/mockData';
+import { getSupervisorsList, OfficialStaffMember } from '../../data/officialStaff';
 import {
   deleteAnnouncement,
+  deleteInternalStaffSummon,
+  getInternalStaffSummons,
   openWhatsAppSummon,
   saveAnnouncement,
+  saveInternalStaffSummon,
   saveSummon,
+  updateInternalStaffSummonStatus,
   updateSummonStatus,
 } from '../../services/storageService';
 import {
   AnnouncementPriority,
   AnnouncementTarget,
   FileFormat,
+  InternalStaffSummon,
   ParentSummon,
   SchoolAnnouncement,
   SchoolDocument,
@@ -61,8 +72,36 @@ export const CensorView: React.FC<CensorViewProps> = ({
   summons,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'summons' | 'new-summon' | 'announcements' | 'new-announcement' | 'chat-supervision'>('summons');
+  const [activeTab, setActiveTab] = useState<
+    'supervisors' | 'new-supervisor-summon' | 'summons' | 'new-summon' | 'announcements' | 'new-announcement' | 'chat-supervision'
+  >('supervisors');
   const [selectedSummonModal, setSelectedSummonModal] = useState<ParentSummon | null>(null);
+
+  // Supervisors (مشرفو التربية الخاضعون لمسؤولية الناظرة)
+  const supervisors = getSupervisorsList();
+  const [internalSummons, setInternalSummons] = useState<InternalStaffSummon[]>(() => getInternalStaffSummons());
+  const censorSupervisorSummons = internalSummons.filter(s => s.issuerRole === 'censor');
+
+  const [targetSupervisorMode, setTargetSupervisorMode] = useState<'single' | 'all'>('single');
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState<string>(supervisors[0]?.identifier || '');
+  const [supervisorReason, setSupervisorReason] = useState('اجتماع التنسيق التربوي وتوزيع جدول المناوبة');
+  const [supervisorReasonDetails, setSupervisorReasonDetails] = useState('');
+  const [supervisorAppDate, setSupervisorAppDate] = useState(
+    new Date(Date.now() + 86400000).toISOString().split('T')[0]
+  );
+  const [supervisorAppTime, setSupervisorAppTime] = useState('08:00 صباحاً');
+  const [supervisorLocation, setSupervisorLocation] = useState('مكتب ناظر المؤسسة');
+  const [supervisorSuccess, setSupervisorSuccess] = useState<string | null>(null);
+  const [previewSupervisorSummon, setPreviewSupervisorSummon] = useState<InternalStaffSummon | null>(null);
+
+  // Listen for internal summons updates
+  useEffect(() => {
+    const handleUpdate = () => {
+      setInternalSummons(getInternalStaffSummons());
+    };
+    window.addEventListener('internal-staff-summons-change', handleUpdate);
+    return () => window.removeEventListener('internal-staff-summons-change', handleUpdate);
+  }, []);
 
   // New Summon Form
   const [studentId, setStudentId] = useState('');
@@ -268,19 +307,24 @@ export const CensorView: React.FC<CensorViewProps> = ({
             </div>
 
             <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight">
-              فضاء الناظر - {currentUser.name}
+              فضاء الناظرة - {currentUser.name}
             </h1>
 
             <p className="text-emerald-100 text-sm max-w-xl">
-              إدارة الانضباط المدرسي، إرسال إعلانات موجهة للتلاميذ، وتوجيه استدعاءات رسمية لأولياء الأمور مباشرة عبر تطبيق واتساب وطباعة الوصولات.
+              المسؤولة عن <strong>مشرفي التربية (3 مشرفين)</strong> و<strong>التلاميذ (393 تلميذاً)</strong>: تنظيم الانضباط المدرسي، توزيع جدول المناوبات، معالجة غيابات وتأخرات التلاميذ، توجيه الاستدعاءات الرسمية للأولياء عبر واتساب، والإشراف التربوي المباشر.
             </p>
           </div>
 
           {/* Quick Metrics */}
           <div className="flex flex-wrap items-center gap-3">
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 min-w-[110px] text-center">
+              <span className="text-xs text-emerald-200 block mb-0.5 font-medium">مشرفو التربية</span>
+              <span className="text-2xl font-black text-white">{supervisors.length}</span>
+            </div>
+
+            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 min-w-[110px] text-center">
               <span className="text-xs text-emerald-200 block mb-0.5 font-medium">استدعاءات الأولياء</span>
-              <span className="text-2xl font-black text-white">{summons.length}</span>
+              <span className="text-2xl font-black text-yellow-300">{summons.length}</span>
             </div>
 
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 min-w-[110px] text-center">
@@ -295,6 +339,30 @@ export const CensorView: React.FC<CensorViewProps> = ({
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <button
+            onClick={() => setActiveTab('supervisors')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'supervisors'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Users className="w-4 h-4 text-teal-400" />
+            <span>مشرفو التربية المسندون ({supervisors.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('new-supervisor-summon')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'new-supervisor-summon'
+                ? 'bg-teal-800 text-white shadow-xs'
+                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
+            }`}
+          >
+            <Send className="w-4 h-4" />
+            <span>استدعاء / تكليف مشرف تربية ➕</span>
+          </button>
+
+          <button
             onClick={() => setActiveTab('summons')}
             className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'summons'
@@ -303,7 +371,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
             }`}
           >
             <MessageCircle className="w-4 h-4 text-emerald-300" />
-            <span>سجل الاستدعاءات وواتساب ({summons.length})</span>
+            <span>استدعاءات أولياء التلاميذ ({summons.length})</span>
           </button>
 
           <button
@@ -315,7 +383,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
             }`}
           >
             <Plus className="w-4 h-4" />
-            <span>إنشاء استدعاء جديد لولي أمر</span>
+            <span>استدعاء ولي أمر جديد</span>
           </button>
 
           <button
@@ -327,19 +395,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
             }`}
           >
             <Bell className="w-4 h-4" />
-            <span>إعلانات التلاميذ المنشورة ({censorAnnouncements.length})</span>
-          </button>
-
-          <button
-            onClick={() => setActiveTab('new-announcement')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
-              activeTab === 'new-announcement'
-                ? 'bg-emerald-700 text-white shadow-xs'
-                : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
-            }`}
-          >
-            <Megaphone className="w-4 h-4" />
-            <span>نشر إعلان جديد للتلاميذ</span>
+            <span>إعلانات التلاميذ ({censorAnnouncements.length})</span>
           </button>
 
           <button
@@ -358,6 +414,497 @@ export const CensorView: React.FC<CensorViewProps> = ({
           </button>
         </div>
       </div>
+
+      {/* ================= TAB: SUPERVISORS ROSTER & LOG ================= */}
+      {activeTab === 'supervisors' && (
+        <div className="space-y-5 text-right">
+          {/* Supervisors Cards */}
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 shadow-xs flex flex-col sm:flex-row items-center justify-between gap-3">
+            <div>
+              <h3 className="text-sm font-bold text-slate-900">
+                مشرفو ومشرفات التربية التابعون لمسؤولية وإشراف الناظرة ({supervisors.length} مشرفين)
+              </h3>
+              <p className="text-xs text-slate-500 mt-0.5">
+                تأطير المناوبة اليومية، مراقبة الساحة والأروقة، معالجة غيابات التلاميذ وضبط النظام الداخلي.
+              </p>
+            </div>
+
+            <button
+              type="button"
+              onClick={() => {
+                setTargetSupervisorMode('all');
+                setActiveTab('new-supervisor-summon');
+              }}
+              className="px-4 py-2 rounded-xl bg-teal-800 hover:bg-teal-900 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm shrink-0"
+            >
+              <Users className="w-4 h-4" />
+              <span>استدعاء كافة المشرفين (اجتماع / مناوبة)</span>
+            </button>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {supervisors.map(sup => (
+              <div
+                key={sup.identifier}
+                className="bg-white rounded-2xl border border-slate-200 p-4 hover:border-teal-500 hover:shadow-md transition-all flex flex-col justify-between space-y-3"
+              >
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex items-center gap-3">
+                    <div className="w-11 h-11 rounded-2xl bg-teal-50 text-teal-800 border border-teal-200 flex items-center justify-center font-bold text-sm shrink-0">
+                      <UserCheck className="w-5 h-5 text-teal-700" />
+                    </div>
+                    <div>
+                      <h4 className="text-sm font-extrabold text-slate-900">
+                        {sup.surname} {sup.firstName}
+                      </h4>
+                      <p className="text-[11px] text-teal-800 font-bold mt-0.5">
+                        {sup.rank}
+                      </p>
+                    </div>
+                  </div>
+
+                  <span className="text-[10px] bg-slate-100 text-slate-600 px-2 py-0.5 rounded-md font-mono shrink-0">
+                    درجة {sup.grade}
+                  </span>
+                </div>
+
+                <div className="bg-slate-50 rounded-xl p-2.5 text-[11px] text-slate-600 space-y-1 font-mono">
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">الرمز المهني:</span>
+                    <span className="font-bold text-slate-800">{sup.identifier}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-400">البريد المؤسسي:</span>
+                    <span className="truncate max-w-[170px]">{sup.email}</span>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    setTargetSupervisorMode('single');
+                    setSelectedSupervisorId(sup.identifier);
+                    setActiveTab('new-supervisor-summon');
+                  }}
+                  className="w-full py-2 px-3 rounded-xl bg-teal-50 hover:bg-teal-700 text-teal-800 hover:text-white border border-teal-300 hover:border-teal-700 text-xs font-bold transition-all flex items-center justify-center gap-1.5 cursor-pointer"
+                >
+                  <Send className="w-3.5 h-3.5" />
+                  <span>استدعاء / تكليف بمناوبة أو مهمة</span>
+                </button>
+              </div>
+            ))}
+          </div>
+
+          {/* Supervisor Summons Log */}
+          <div className="bg-white rounded-3xl border border-slate-200 p-5 space-y-4">
+            <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+              <h4 className="text-xs sm:text-sm font-bold text-slate-900 flex items-center gap-2">
+                <FileText className="w-4 h-4 text-teal-700" />
+                <span>سجل استدعاءات وتكليفات مشرفي التربية الصادرة عن الناظرة ({censorSupervisorSummons.length})</span>
+              </h4>
+              <button
+                type="button"
+                onClick={() => setActiveTab('new-supervisor-summon')}
+                className="text-xs text-teal-700 font-bold hover:underline"
+              >
+                + تكليف جديد
+              </button>
+            </div>
+
+            {censorSupervisorSummons.length === 0 ? (
+              <div className="p-8 text-center text-xs text-slate-400 space-y-2">
+                <p>لم يتم تسجيل استدعاءات لمشرفي التربية حتى الآن.</p>
+                <p>يمكنك استدعاء أي مشرف أو تعميم تكليف بمناوبة الساحة والمطعم بنقرة واحدة.</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {censorSupervisorSummons.map(s => (
+                  <div
+                    key={s.id}
+                    className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:shadow-xs transition-all flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs"
+                  >
+                    <div className="space-y-1 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-bold text-teal-900 bg-teal-100/80 px-2 py-0.5 rounded-md">
+                          {s.targetStaffName}
+                        </span>
+                        <span className="text-[11px] text-slate-500">
+                          ({s.targetStaffRank || 'مشرف تربية'})
+                        </span>
+                        <span
+                          className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${
+                            s.status === 'completed'
+                              ? 'bg-emerald-100 text-emerald-800'
+                              : 'bg-amber-100 text-amber-800'
+                          }`}
+                        >
+                          {s.status === 'completed' ? 'تم الإنجاز' : 'مبرمج / قيد المتابعة'}
+                        </span>
+                      </div>
+                      <p className="font-bold text-slate-800">{s.reason}</p>
+                      <div className="flex flex-wrap items-center gap-3 text-[11px] text-slate-500 font-mono">
+                        <span>📅 {s.appointmentDate}</span>
+                        <span>⏰ {s.appointmentTime}</span>
+                        <span>📍 {s.location || 'مكتب الناظر'}</span>
+                      </div>
+                    </div>
+
+                    <div className="flex items-center gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => setPreviewSupervisorSummon(s)}
+                        className="px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs flex items-center gap-1"
+                      >
+                        <Printer className="w-3.5 h-3.5" />
+                        <span>طباعة</span>
+                      </button>
+
+                      {s.status !== 'completed' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateInternalStaffSummonStatus(s.id, 'completed');
+                            setInternalSummons(getInternalStaffSummons());
+                          }}
+                          className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 font-bold text-xs border border-emerald-300"
+                        >
+                          تأكيد الإنجاز
+                        </button>
+                      )}
+
+                      <button
+                        type="button"
+                        onClick={() => {
+                          deleteInternalStaffSummon(s.id);
+                          setInternalSummons(getInternalStaffSummons());
+                        }}
+                        className="p-1.5 rounded-xl text-slate-400 hover:text-rose-600 hover:bg-rose-50"
+                      >
+                        <Trash2 className="w-4 h-4" />
+                      </button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      {/* ================= TAB: NEW SUPERVISOR SUMMON FORM ================= */}
+      {activeTab === 'new-supervisor-summon' && (
+        <div className="bg-white rounded-3xl border border-slate-200 p-5 sm:p-7 shadow-sm space-y-6 text-right">
+          <div className="border-b border-slate-100 pb-4">
+            <h3 className="text-base sm:text-lg font-extrabold text-slate-900">
+              إصدار استدعاء / تكليف بمهمة لمشرفي التربية
+            </h3>
+            <p className="text-xs text-slate-500 mt-1">
+              يصدر عن ناظرة المؤسسة للتنسيق التربوي، توزيع جدول مناوبة الساحة والمطعم، ومتابعة الانضباط.
+            </p>
+          </div>
+
+          {supervisorSuccess && (
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 text-xs font-bold flex items-center gap-2.5 animate-in fade-in">
+              <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+              <span>{supervisorSuccess}</span>
+            </div>
+          )}
+
+          <form
+            onSubmit={e => {
+              e.preventDefault();
+              setSupervisorSuccess(null);
+              const isAll = targetSupervisorMode === 'all';
+              const targetSup = supervisors.find(s => s.identifier === selectedSupervisorId);
+
+              const newSummon = saveInternalStaffSummon({
+                targetType: isAll ? 'all_supervisors' : 'supervisor',
+                targetStaffIdentifier: isAll ? 'ALL' : targetSup?.identifier,
+                targetStaffName: isAll ? 'كافة مشرفي ومشرفات التربية' : `${targetSup?.surname} ${targetSup?.firstName}`,
+                targetStaffRank: isAll ? 'سلك مشرفي التربية (3 مشرفين)' : targetSup?.rank,
+                issuerRole: 'censor',
+                issuerName: `${currentUser.name} (ناظرة المؤسسة)`,
+                reason: supervisorReason,
+                reasonDetails: supervisorReasonDetails.trim() || undefined,
+                appointmentDate: supervisorAppDate,
+                appointmentTime: supervisorAppTime,
+                location: supervisorLocation,
+              });
+
+              setInternalSummons(getInternalStaffSummons());
+              setSupervisorSuccess(
+                isAll
+                  ? 'تم إصدار وتعميم الاستدعاء والتكليف لكافة المشرفين بنجاح!'
+                  : `تم إصدار الاستدعاء للمشرف (${newSummon.targetStaffName}) بنجاح!`
+              );
+              setPreviewSupervisorSummon(newSummon);
+
+              setTimeout(() => {
+                setSupervisorSuccess(null);
+              }, 4000);
+            }}
+            className="space-y-5"
+          >
+            {/* Scope: Single vs All */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-2">
+                نطاق الاستدعاء: <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <button
+                  type="button"
+                  onClick={() => setTargetSupervisorMode('single')}
+                  className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
+                    targetSupervisorMode === 'single'
+                      ? 'bg-teal-50 border-teal-600 text-teal-950 font-black shadow-xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <User className="w-5 h-5 text-teal-700 shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold">استدعاء مشرف تربية فردي (محدد)</div>
+                    <div className="text-[11px] text-slate-500 font-normal">توجيه الاستدعاء أو المهمة لمشرف بعينه.</div>
+                  </div>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTargetSupervisorMode('all')}
+                  className={`p-3.5 rounded-2xl border text-right transition-all flex items-center gap-3 cursor-pointer ${
+                    targetSupervisorMode === 'all'
+                      ? 'bg-amber-50 border-amber-600 text-amber-950 font-black shadow-xs'
+                      : 'bg-slate-50 border-slate-200 text-slate-700 hover:bg-slate-100'
+                  }`}
+                >
+                  <Users className="w-5 h-5 text-amber-700 shrink-0" />
+                  <div>
+                    <div className="text-xs font-bold">استدعاء جماعي لكافة مشرفي التربية (3 مشرفين)</div>
+                    <div className="text-[11px] text-slate-500 font-normal">اجتماع تنسيقي، توزيع جدول المناوبات العام.</div>
+                  </div>
+                </button>
+              </div>
+            </div>
+
+            {/* Dropdown if single */}
+            {targetSupervisorMode === 'single' && (
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                  اختيار المشرف المعني: <span className="text-red-500">*</span>
+                </label>
+                <select
+                  required
+                  value={selectedSupervisorId}
+                  onChange={e => setSelectedSupervisorId(e.target.value)}
+                  className="w-full p-3 rounded-xl border border-slate-300 text-xs font-bold text-slate-800 outline-none focus:border-teal-600 bg-white"
+                >
+                  {supervisors.map(sup => (
+                    <option key={sup.identifier} value={sup.identifier}>
+                      {sup.surname} {sup.firstName} — ({sup.rank})
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            {/* Reasons */}
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                موضوع الاستدعاء / التكليف بمهمة: <span className="text-red-500">*</span>
+              </label>
+              <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2 mb-2.5">
+                {[
+                  'اجتماع التنسيق التربوي وتوزيع جدول المناوبة اليومية',
+                  'مناوبة ومراقبة الساحة والمطعم المدرسي والأروقة',
+                  'متابعة ومعالجة ملفات غيابات وتأخرات التلاميذ',
+                  'تنظيم وتأطير دخول وخروج التلاميذ والانضباط العام',
+                  'التحضير لجلسات مجالس الأقسام والانضباط',
+                  'استدعاء إداري وتربوي عاجل لمكتب الناظرة',
+                ].map((r, i) => (
+                  <button
+                    type="button"
+                    key={i}
+                    onClick={() => setSupervisorReason(r)}
+                    className={`p-2 rounded-xl border text-xs font-bold text-right transition-all ${
+                      supervisorReason === r
+                        ? 'bg-teal-700 text-white border-teal-700 shadow-xs'
+                        : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-slate-100'
+                    }`}
+                  >
+                    {r}
+                  </button>
+                ))}
+              </div>
+              <input
+                type="text"
+                required
+                value={supervisorReason}
+                onChange={e => setSupervisorReason(e.target.value)}
+                placeholder="أو اكتب موضوع التكليف المخصص..."
+                className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 outline-none focus:border-teal-600"
+              />
+            </div>
+
+            {/* Date, Time, Location */}
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  تاريخ الحضور / المناوبة: <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="date"
+                  required
+                  value={supervisorAppDate}
+                  onChange={e => setSupervisorAppDate(e.target.value)}
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 outline-none focus:border-teal-600 font-mono"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  التوقيت: <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={supervisorAppTime}
+                  onChange={e => setSupervisorAppTime(e.target.value)}
+                  placeholder="مثال: 08:00 صباحاً"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 outline-none focus:border-teal-600"
+                />
+              </div>
+
+              <div>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  المكان: <span className="text-red-500">*</span>
+                </label>
+                <input
+                  type="text"
+                  required
+                  value={supervisorLocation}
+                  onChange={e => setSupervisorLocation(e.target.value)}
+                  placeholder="مكتب الناظرة أو ساحة المؤسسة"
+                  className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 outline-none focus:border-teal-600"
+                />
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-xs font-bold text-slate-700 mb-1">
+                تفاصيل إضافية أو مهام المتابعة:
+              </label>
+              <textarea
+                rows={2}
+                value={supervisorReasonDetails}
+                onChange={e => setSupervisorReasonDetails(e.target.value)}
+                placeholder="تعليمات إضافية حول فترات المناوبة، متابعة الأجنحة..."
+                className="w-full p-2.5 rounded-xl border border-slate-300 text-xs text-slate-900 outline-none focus:border-teal-600"
+              />
+            </div>
+
+            <div className="pt-2 flex items-center justify-end gap-3">
+              <button
+                type="submit"
+                className="px-6 py-3 rounded-2xl bg-teal-800 hover:bg-teal-900 text-white font-black text-xs sm:text-sm flex items-center gap-2 shadow-md transition-transform active:scale-95 cursor-pointer"
+              >
+                <Send className="w-4 h-4" />
+                <span>إصدار استدعاء المشرف وتوثيقه رسمياً</span>
+              </button>
+            </div>
+          </form>
+        </div>
+      )}
+
+      {/* Printable Supervisor Summon Modal */}
+      {previewSupervisorSummon && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in">
+          <div className="bg-white w-full max-w-2xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden flex flex-col">
+            <div className="bg-slate-900 text-white p-4 flex items-center justify-between shrink-0">
+              <div className="flex items-center gap-2">
+                <Printer className="w-5 h-5 text-yellow-300" />
+                <h4 className="text-sm font-bold">معاينة استدعاء مشرف التربية الرسمي للطباعة</h4>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => window.print()}
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm"
+                >
+                  <Printer className="w-3.5 h-3.5" />
+                  <span>طباعة الآن</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPreviewSupervisorSummon(null)}
+                  className="p-1.5 rounded-xl bg-white/10 hover:bg-white/20 text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6 sm:p-8 overflow-y-auto space-y-6 text-right bg-white text-slate-900">
+              <div className="text-center border-b border-slate-300 pb-4 space-y-1">
+                <p className="text-xs font-bold text-slate-600">الجمهورية الجزائرية الديمقراطية الشعبية</p>
+                <p className="text-xs font-bold text-slate-700">وزارة التربية الوطنية - مديرية التربية لولاية غليزان</p>
+                <h3 className="text-base font-black text-slate-900">{SCHOOL_NAME}</h3>
+                <p className="text-xs font-bold text-teal-800">مكتب ناظر المؤسسة - مستشارية التربية</p>
+                <div className="inline-block bg-teal-900 text-white px-5 py-1 rounded-full text-xs font-black mt-2">
+                  استدعاء رسمي / تكليف بمهمة تربوية ومناوبة
+                </div>
+              </div>
+
+              <div className="space-y-4 text-xs leading-relaxed">
+                <div className="bg-slate-50 border border-slate-200 p-4 rounded-2xl space-y-2">
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500">المعني بالاستدعاء:</span>
+                    <strong className="text-sm text-slate-900">{previewSupervisorSummon.targetStaffName}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500">الرتبة:</span>
+                    <span className="font-bold text-slate-800">{previewSupervisorSummon.targetStaffRank || 'مشرف تربية'}</span>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500">موضوع المهمة:</span>
+                    <strong className="text-teal-900">{previewSupervisorSummon.reason}</strong>
+                  </div>
+                  <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                    <span className="text-slate-500">التاريخ والموعد:</span>
+                    <span className="font-bold text-slate-800">
+                      يوم <strong>{previewSupervisorSummon.appointmentDate}</strong> على الساعة <strong>{previewSupervisorSummon.appointmentTime}</strong>
+                    </span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">المكان:</span>
+                    <span className="font-bold text-slate-800">{previewSupervisorSummon.location || 'مكتب الناظرة'}</span>
+                  </div>
+                </div>
+
+                {previewSupervisorSummon.reasonDetails && (
+                  <div className="p-3 bg-amber-50/60 border border-amber-200 rounded-xl text-xs text-amber-950">
+                    <strong>ملاحظات وتوجيهات:</strong> {previewSupervisorSummon.reasonDetails}
+                  </div>
+                )}
+              </div>
+
+              <div className="flex items-center justify-between pt-6 border-t border-slate-300 text-xs">
+                <div className="text-center w-40">
+                  <span className="text-slate-500 block mb-1">توقيع المشرف(ة):</span>
+                  <div className="h-10 border-b border-dashed border-slate-400" />
+                </div>
+
+                <div className="text-center w-48">
+                  <span className="text-slate-500 block mb-1">ناظرة المؤسسة:</span>
+                  <div className="p-2 border border-teal-300 rounded-xl bg-teal-50 text-[11px] font-bold text-teal-950">
+                    شقايبل نعيمة
+                    <br />
+                    <span className="text-[9px] text-teal-700">ختم وتوقيع ناظرة التعليم المتوسط</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Tab: Summons List & WhatsApp Actions */}
       {activeTab === 'summons' && (

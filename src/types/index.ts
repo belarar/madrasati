@@ -118,6 +118,27 @@ export interface ParentSummon {
   notes?: string;
 }
 
+// ================= استدعاءات وتكليفات الطاقم الداخلي (العمال المهنيون والمشرفون) =================
+export type StaffSummonTargetType = 'worker' | 'supervisor' | 'all_workers' | 'all_supervisors';
+
+export interface InternalStaffSummon {
+  id: string;
+  targetType: StaffSummonTargetType;
+  targetStaffIdentifier?: string; // e.g. worker identifier or 'ALL'
+  targetStaffName: string; // e.g. "بن سعيد فوزي" or "كافة العمال المهنيين"
+  targetStaffRank?: string; // e.g. "عامل مهني خارج الصنف"
+  issuerRole: 'bursar' | 'censor' | 'director';
+  issuerName: string; // e.g. "حفيظة مكي (المقتصدة)" or "نعيمة شقايبل (الناظرة)"
+  reason: string;
+  reasonDetails?: string;
+  appointmentDate: string;
+  appointmentTime: string;
+  location?: string;
+  issuedAt: string;
+  status: 'pending' | 'completed' | 'cancelled';
+  notes?: string;
+}
+
 export interface UserProfile {
   id: string; // Student ID or Professional ID
   name: string;
@@ -130,6 +151,7 @@ export interface UserProfile {
   subjects?: SubjectId[]; // For teachers
   assignedClasses?: string[]; // For teachers
   title?: string; // e.g. "مدير المؤسسة", "ناظر المتوسطة", "أستاذ التعليم المتوسط"
+  rank?: string; // الرتبة الرسمية للموظف
   phone?: string;
   avatarUrl?: string;
 }

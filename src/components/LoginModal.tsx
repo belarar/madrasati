@@ -7,12 +7,14 @@ import {
   Clock,
   Eye,
   EyeOff,
+  Coins,
   GraduationCap,
   KeyRound,
   Lock,
   LogIn,
   Shield,
   ShieldAlert,
+  User,
   UserCheck,
   X,
 } from 'lucide-react';
@@ -431,6 +433,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </>
                   )}
                 </button>
+
+                <div className="pt-2 border-t border-emerald-200/60">
+                  <span className="text-[11px] font-bold text-slate-500 block mb-1.5">
+                    تجربة سريعة لحساب تلميذ مسجل رسمياً:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setStudentClassId('4AM-1');
+                      setStudentSurname('بن نعمة');
+                      setStudentFirstName('محمد');
+                      setStudentId('2010480100340001');
+                    }}
+                    className="w-full p-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold text-xs border border-emerald-300 flex items-center justify-between transition-colors cursor-pointer"
+                  >
+                    <span>ملء بيانات تلميذ: بن نعمة محمد (4 متوسط 1)</span>
+                    <GraduationCap className="w-4 h-4 text-emerald-700" />
+                  </button>
+                </div>
               </form>
             </div>
           ) : isResetMode ? (
@@ -722,6 +743,73 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     </>
                   )}
                 </button>
+
+                <div className="pt-3 border-t border-slate-200">
+                  <span className="text-[11px] font-bold text-slate-500 block mb-2">
+                    حسابات رسمية سريعة للمعاينة والتجربة:
+                  </span>
+                  <div className="grid grid-cols-2 gap-2 text-xs">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffId('1097448010036800');
+                        setStaffPin('1234');
+                      }}
+                      className="p-2.5 rounded-xl bg-purple-50 hover:bg-purple-100 text-purple-950 font-bold border border-purple-200 text-right flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <div>
+                        <span className="block font-black">المدير: عدة عمار</span>
+                        <span className="text-[10px] text-purple-700 font-normal">إدارة وتفعيل الحسابات</span>
+                      </div>
+                      <Building className="w-4 h-4 text-purple-700 shrink-0" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffId('1198044010190200');
+                        setStaffPin('1234');
+                      }}
+                      className="p-2.5 rounded-xl bg-teal-50 hover:bg-teal-100 text-teal-950 font-bold border border-teal-200 text-right flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <div>
+                        <span className="block font-black">الناظرة: شقايبل نعيمة</span>
+                        <span className="text-[10px] text-teal-700 font-normal">المشرفون والتلاميذ</span>
+                      </div>
+                      <Shield className="w-4 h-4 text-teal-700 shrink-0" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffId('1197748280037000');
+                        setStaffPin('1234');
+                      }}
+                      className="p-2.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-950 font-bold border border-emerald-300 text-right flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <div>
+                        <span className="block font-black">المقتصدة: مكي حفيظة</span>
+                        <span className="text-[10px] text-emerald-700 font-normal">إسناد واستدعاء العمال</span>
+                      </div>
+                      <Coins className="w-4 h-4 text-emerald-700 shrink-0" />
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setStaffId('1098429340019200');
+                        setStaffPin('1234');
+                      }}
+                      className="p-2.5 rounded-xl bg-blue-50 hover:bg-blue-100 text-blue-950 font-bold border border-blue-200 text-right flex items-center justify-between transition-colors cursor-pointer"
+                    >
+                      <div>
+                        <span className="block font-black">أستاذ: العربي بن حجار</span>
+                        <span className="text-[10px] text-blue-700 font-normal">أستاذ الرياضيات (4م)</span>
+                      </div>
+                      <User className="w-4 h-4 text-blue-700 shrink-0" />
+                    </button>
+                  </div>
+                </div>
 
                 <div className="mt-4 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl text-xs text-slate-600 leading-relaxed flex items-start gap-2.5">
                   <Shield className="w-4 h-4 text-emerald-700 shrink-0 mt-0.5" />

@@ -13,6 +13,7 @@ export interface OfficialStaffMember {
   effectiveDate: string; // تاريخ السريان
   pin?: string; // كلمة السر الشخصية (من 4 خانات فما فوق)
   email?: string;
+  assignedClasses?: string[]; // الأقسام المسندة للأستاذ بناءً على جدول التوقيت العام
 }
 
 // القائمة الرسمية الكاملة لمستخدمي متوسطة الشهيد بن نعمة مصطفى (42 موظفاً وأستاذاً)
@@ -41,7 +42,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     email: 'chakaibel.naima@education.dz',
   },
 
-  // ================= 2. الأساتذة =================
+  // ================= 2. الأساتذة والجدول العام لإسناد الأقسام =================
   {
     identifier: '1197348010089800',
     surname: 'حمزة',
@@ -54,6 +55,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 12,
     effectiveDate: '2025-01-01',
     email: 'hamza.nafissa@education.dz',
+    assignedClasses: ['2AM-2', '4AM-1', '4AM-2', '4AM-3'], // 2م2، 4م1، 4م2، 4م3
   },
   {
     identifier: '1198748010008200',
@@ -67,6 +69,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 0,
     effectiveDate: '2025-03-23',
     email: 'harrat.ghania@education.dz',
+    assignedClasses: ['2AM-1', '2AM-2', '3AM-1', '3AM-2'], // 2م1، 2م2، 3م1، 3م2
   },
   {
     identifier: '1097331010938000',
@@ -80,6 +83,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 9,
     effectiveDate: '2025-01-01',
     email: 'ahmedfouatih.houari@education.dz',
+    assignedClasses: ['1AM-1', '4AM-1', '4AM-2', '4AM-3'], // 1م1، 4م1، 4م2، 4م3
   },
   {
     identifier: '1198248010321500',
@@ -93,6 +97,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 6,
     effectiveDate: '2025-01-01',
     email: 'bouras.souad@education.dz',
+    assignedClasses: ['1AM-2', '2AM-1', '2AM-2', '2AM-3'], // 1م2، 2م1، 2م2، 2م3
   },
   {
     identifier: '1199431010368800',
@@ -106,6 +111,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 3,
     effectiveDate: '2025-09-04',
     email: 'belkhodja.najia@education.dz',
+    assignedClasses: ['2AM-1', '2AM-2', '2AM-3', '3AM-2', '4AM-1', '4AM-2', '4AM-3'], // 2م1، 2م2، 2م3، 3م2، 4م1، 4م2، 4م3
   },
   {
     identifier: '1198540010004300',
@@ -119,6 +125,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 4,
     effectiveDate: '2025-01-01',
     email: 'melih.meryem@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-3', '3AM-1'], // 1م1، 1م2، 1م3، 2م1، 2م3، 3م1
   },
   {
     identifier: '1198702040226100',
@@ -132,6 +139,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 4,
     effectiveDate: '2025-01-01',
     email: 'miraoui.yasmina@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '3AM-2', '4AM-1', '4AM-2', '4AM-3'], // كافة أقسام المؤسسة
   },
   {
     identifier: '1198948090064800',
@@ -145,6 +153,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 4,
     effectiveDate: '2025-01-01',
     email: 'raouane.fouzia@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-3', '3AM-1', '3AM-2'], // 1م1، 1م2، 1م3، 2م3، 3م1، 3م2 (بن دربال فوزية)
   },
   {
     identifier: '1199048010302000',
@@ -158,6 +167,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 4,
     effectiveDate: '2025-09-04',
     email: 'bentata.fatma@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-3', '3AM-1'], // 1م1، 1م2، 1م3، 2م1، 2م3، 3م1
   },
   {
     identifier: '1098748010140400',
@@ -171,6 +181,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 1,
     effectiveDate: '2025-06-11',
     email: 'othmane.benouda@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '3AM-2', '4AM-1', '4AM-2', '4AM-3'],
   },
   {
     identifier: '1199348010004800',
@@ -184,6 +195,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 3,
     effectiveDate: '2025-01-01',
     email: 'safa.khira@education.dz',
+    assignedClasses: ['1AM-3', '2AM-3', '3AM-1', '3AM-2'], // 1م3، 2م3، 3م1، 3م2
   },
   {
     identifier: '1098948080039300',
@@ -197,6 +209,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 5,
     effectiveDate: '2025-11-24',
     email: 'menad.mohammed@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-3'], // 1م1، 1م2، 1م3، 2م3
   },
   {
     identifier: '1197414160078700',
@@ -210,6 +223,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 7,
     effectiveDate: '2025-01-01',
     email: 'khelil.samia@education.dz',
+    assignedClasses: ['2AM-1', '2AM-2', '2AM-3', '3AM-2', '4AM-1', '4AM-2', '4AM-3'], // 2م1، 2م2، 2م3، 3م2، 4م1، 4م2، 4م3 (ميلود عامر سامية)
   },
   {
     identifier: '1198613010150400',
@@ -223,6 +237,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 6,
     effectiveDate: '2025-10-01',
     email: 'hamoumi.chemissa@education.dz',
+    assignedClasses: ['1AM-2', '2AM-1', '2AM-2', '4AM-2'], // 1م2، 2م1، 2م2، 4م2
   },
   {
     identifier: '1097748010047200',
@@ -236,6 +251,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 9,
     effectiveDate: '2025-08-16',
     email: 'mekki.yahia@education.dz',
+    assignedClasses: ['1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '4AM-1'], // التربية التشكيلية
   },
   {
     identifier: '1198646090002600',
@@ -249,6 +265,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 6,
     effectiveDate: '2025-01-01',
     email: 'belkherroubi.nawel@education.dz',
+    assignedClasses: ['1AM-3', '2AM-3', '3AM-1', '3AM-2'], // 1م3، 2م3، 3م1، 3م2 (بن بريكة نوال)
   },
   {
     identifier: '1098429340019200',
@@ -262,6 +279,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 7,
     effectiveDate: '2025-05-01',
     email: 'elarbi.samir@education.dz',
+    assignedClasses: ['4AM-1', '4AM-2', '4AM-3'], // كافة أقسام السنة الرابعة متوسط
   },
   {
     identifier: '8197148010100500',
@@ -275,6 +293,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 11,
     effectiveDate: '2025-01-01',
     email: 'djouhari.djamila@education.dz',
+    assignedClasses: ['2AM-1', '2AM-2', '2AM-3', '3AM-2', '4AM-1', '4AM-2', '4AM-3'], // 2م1، 2م2، 2م3، 3م2، 4م1، 4م2، 4م3
   },
   {
     identifier: '1096448010043700',
@@ -288,6 +307,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 12,
     effectiveDate: '2025-01-01',
     email: 'haddah.belalia@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '2AM-1'], // 1م1، 1م2، 2م1 (جداه بلعاليا)
   },
   {
     identifier: '1096848010025200',
@@ -301,6 +321,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 12,
     effectiveDate: '2025-01-01',
     email: 'soudani.benouda@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '3AM-2', '4AM-1', '4AM-2', '4AM-3'],
   },
   {
     identifier: '1198048010203300',
@@ -314,6 +335,7 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 8,
     effectiveDate: '2025-01-01',
     email: 'aoumer.ouahiba@education.dz',
+    assignedClasses: ['2AM-3', '3AM-2', '4AM-1', '4AM-3'], // 2م3، 3م2، 4م1، 4م3
   },
   {
     identifier: '1097248010133200',
@@ -327,6 +349,21 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     grade: 10,
     effectiveDate: '2025-01-01',
     email: 'besseghir.laid@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-3', '3AM-1', '3AM-2'], // 1م1، 1م2، 1م3، 2م1، 2م3، 3م1، 3م2
+  },
+  {
+    identifier: '1097848010999900',
+    surname: 'عريبي',
+    firstName: 'الطيب',
+    birthDate: '1978-11-20',
+    rank: 'أستاذ التعليم المتوسط',
+    subjectName: 'التربية الإسلامية',
+    subjectId: 'islamic',
+    role: 'teacher',
+    grade: 8,
+    effectiveDate: '2025-01-01',
+    email: 'aribi.eltayeb@education.dz',
+    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '3AM-2', '4AM-1', '4AM-2', '4AM-3'],
   },
 
   // ================= 3. الطاقم الإداري والمشرفون =================
@@ -540,8 +577,116 @@ export function toStaffUserProfile(member: OfficialStaffMember): UserProfile {
     name: `${member.surname} ${member.firstName}`,
     role: member.role,
     title: roleTitle,
+    rank: member.rank,
     pin: member.pin,
     email: member.email || `${member.identifier}@education.dz`,
     subjects: member.subjectId ? [member.subjectId] : undefined,
+    assignedClasses: member.assignedClasses,
   };
 }
+
+// قائمة العمال المهنيين المسندين للمقتصدة حصرياً
+export function getWorkersList(): OfficialStaffMember[] {
+  return OFFICIAL_STAFF_LIST.filter(
+    s => s.rank.includes('عامل مهني') || s.rank.includes('عون الوقاية')
+  );
+}
+
+// قائمة مشرفي التربية التابعين لإشراف ومسؤولية الناظرة
+export function getSupervisorsList(): OfficialStaffMember[] {
+  return OFFICIAL_STAFF_LIST.filter(
+    s => s.rank.includes('مشرف') || s.rank.includes('مشرفة')
+  );
+}
+
+// التحقق هل الأستاذ مسند لهذا القسم تحديداً (استناداً إلى جدول التوقيت العام المعتمد)
+export function isTeacherAssignedToClass(authorNameOrId: string, classId: string): boolean {
+  if (!authorNameOrId || !classId) return false;
+  const raw = authorNameOrId.trim();
+  const cleanKey = raw.toLowerCase();
+  const idKey = cleanKey.replace(/^staff-/, '');
+
+  // Find teacher by identifier or name
+  const teacher = OFFICIAL_STAFF_LIST.find(s => {
+    if (s.role !== 'teacher') return false;
+    if (s.identifier === idKey || s.identifier === cleanKey) return true;
+    if (cleanKey.includes(s.identifier)) return true;
+
+    const fullName = `${s.surname} ${s.firstName}`.toLowerCase();
+    const reverseName = `${s.firstName} ${s.surname}`.toLowerCase();
+    if (cleanKey === fullName || cleanKey === reverseName) return true;
+    if (cleanKey.includes(fullName) || cleanKey.includes(reverseName)) return true;
+
+    // Matching by surname if at least 3 characters
+    if (s.surname.length >= 3 && cleanKey.includes(s.surname.toLowerCase())) return true;
+    return false;
+  });
+
+  if (!teacher) {
+    // If not found as a teacher (e.g. Director or Censor publishing institutional docs), allow
+    const isOtherStaff = OFFICIAL_STAFF_LIST.some(
+      s => (s.role === 'director' || s.role === 'censor') &&
+           (s.identifier === idKey || cleanKey.includes(s.surname.toLowerCase()))
+    );
+    return isOtherStaff;
+  }
+
+  if (!teacher.assignedClasses || teacher.assignedClasses.length === 0) {
+    return false;
+  }
+
+  return teacher.assignedClasses.includes(classId);
+}
+
+// جلب الأقسام المسندة لأستاذ محدد
+export function getTeacherAssignedClasses(identifierOrName: string): string[] {
+  if (!identifierOrName) return [];
+  const raw = identifierOrName.trim();
+  const cleanKey = raw.toLowerCase();
+  const idKey = cleanKey.replace(/^staff-/, '');
+
+  const teacher = OFFICIAL_STAFF_LIST.find(s => {
+    if (s.role !== 'teacher') return false;
+    if (s.identifier === idKey || s.identifier === cleanKey) return true;
+    const fullName = `${s.surname} ${s.firstName}`.toLowerCase();
+    return cleanKey.includes(fullName) || (s.surname.length >= 3 && cleanKey.includes(s.surname.toLowerCase()));
+  });
+
+  return teacher?.assignedClasses || [];
+}
+
+// معلومات أستاذ المادة المسند لقسم
+export interface ClassTeacherInfo {
+  subjectId: SubjectId;
+  subjectName: string;
+  teacherName: string;
+  teacherIdentifier: string;
+  rank: string;
+}
+
+// جلب قائمة الأساتذة الرسميين المسندين لقسم محدد وفق جدول التوقيت العام
+export function getTeachersForClass(classId: string): ClassTeacherInfo[] {
+  if (!classId) return [];
+  const results: ClassTeacherInfo[] = [];
+
+  for (const staff of OFFICIAL_STAFF_LIST) {
+    if (
+      staff.role === 'teacher' &&
+      staff.assignedClasses &&
+      staff.assignedClasses.includes(classId) &&
+      staff.subjectId &&
+      staff.subjectName
+    ) {
+      results.push({
+        subjectId: staff.subjectId,
+        subjectName: staff.subjectName,
+        teacherName: `${staff.surname} ${staff.firstName}`,
+        teacherIdentifier: staff.identifier,
+        rank: staff.rank,
+      });
+    }
+  }
+
+  return results;
+}
+

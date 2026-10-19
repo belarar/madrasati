@@ -39,6 +39,7 @@ export interface SchoolDatabase {
   documents: any[];
   announcements: any[];
   summons: any[];
+  internalStaffSummons?: any[];
   peerExchanges: any[];
   privateConversations: any[];
   privateMessages: any[];
@@ -72,6 +73,7 @@ function loadDatabase(): SchoolDatabase {
         if (!Array.isArray(parsed.privateMessages)) parsed.privateMessages = [];
         if (!parsed.userCustomPins) parsed.userCustomPins = {};
         if (!Array.isArray(parsed.passwordResetRequests)) parsed.passwordResetRequests = [];
+        if (!Array.isArray(parsed.internalStaffSummons)) parsed.internalStaffSummons = [];
 
         // Seed initial sample conversation between two 2AM-2 classmates if empty
         if (parsed.privateConversations.length === 0) {
@@ -622,6 +624,60 @@ app.patch('/api/summons/:id', (req, res) => {
   const { id } = req.params;
   const { status } = req.body;
   db.summons = db.summons.map(s => (s.id === id ? { ...s, status } : s));
+  saveDatabase(db);
+  res.json({ success: true });
+});
+
+// 5.1 Internal Staff Summons API (استدعاءات وتكليفات العمال المهنيين والمشرفين)
+app.get('/api/internal-summons', (req, res) => {
+  if (!Array.isArray(db.internalStaffSummons)) db.internalStaffSummons = [];
+  res.json(db.internalStaffSummons);
+});
+
+app.post('/api/internal-summons', (req, res) => {
+  if (!Array.isArray(db.internalStaffSummons)) db.internalStaffSummons = [];
+  const summon = req.body;
+  const newSummon = {
+    ...summon,
+    id: summon.id || 'int-sum-' + Date.now(),
+    issuedAt: summon.issuedAt || new Date().toISOString(),
+    status: summon.status || 'pending',
+  };
+
+  db.internalStaffSummons = [newSummon, ...db.internalStaffSummons.filter((s: any) => s.id !== newSummon.id)];
+
+  // Notification for staff and director
+  const notif: AppNotification = {
+    id: 'notif-int-sum-' + Date.now(),
+    type: 'summon',
+    title: `استدعاء / تكليف بمهمة: ${newSummon.targetStaffName}`,
+    message: `${newSummon.issuerName} قامت بإصدار استدعاء/تكليف بمهمة: "${newSummon.reason}" بتاريخ ${newSummon.appointmentDate} (${newSummon.appointmentTime}).`,
+    targetRole: 'staff',
+    targetUserId: newSummon.targetStaffIdentifier,
+    sourceAuthorName: newSummon.issuerName,
+    sourceId: newSummon.id,
+    createdAt: new Date().toISOString(),
+    readBy: [],
+  };
+  db.notifications = [notif, ...db.notifications];
+
+  saveDatabase(db);
+  res.status(201).json(newSummon);
+});
+
+app.patch('/api/internal-summons/:id', (req, res) => {
+  if (!Array.isArray(db.internalStaffSummons)) db.internalStaffSummons = [];
+  const { id } = req.params;
+  const { status } = req.body;
+  db.internalStaffSummons = db.internalStaffSummons.map((s: any) => (s.id === id ? { ...s, status } : s));
+  saveDatabase(db);
+  res.json({ success: true });
+});
+
+app.delete('/api/internal-summons/:id', (req, res) => {
+  if (!Array.isArray(db.internalStaffSummons)) db.internalStaffSummons = [];
+  const { id } = req.params;
+  db.internalStaffSummons = db.internalStaffSummons.filter((s: any) => s.id !== id);
   saveDatabase(db);
   res.json({ success: true });
 });
