@@ -400,7 +400,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 min-w-[110px] text-center">
               <span className="text-xs text-sky-200 block mb-0.5 font-medium">أقسامك الموكلة</span>
               <span className="text-2xl font-black text-white">
-                {currentUser.assignedClasses?.length || 3}
+                {teacherAssignedClassIds.length}
               </span>
             </div>
           </div>

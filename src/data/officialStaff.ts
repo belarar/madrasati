@@ -250,8 +250,19 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     role: 'teacher',
     grade: 9,
     effectiveDate: '2025-08-16',
-    email: 'mekki.yahia@education.dz',
-    assignedClasses: ['1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '4AM-1'], // التربية التشكيلية
+    assignedClasses: [
+      '1AM-1',
+      '1AM-2',
+      '1AM-3',
+      '2AM-1',
+      '2AM-2',
+      '2AM-3',
+      '3AM-1',
+      '3AM-2',
+      '4AM-1',
+      '4AM-2',
+      '4AM-3',
+    ], // كافة أقسام المؤسسة (11 قسماً) - التربية التشكيلية
   },
   {
     identifier: '1198646090002600',

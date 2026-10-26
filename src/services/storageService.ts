@@ -283,7 +283,7 @@ export function getCurrentUser(): UserProfile | null {
     if (!raw) return null; // Clean guest state - user must log in
     const user: UserProfile = JSON.parse(raw);
 
-    // If staff member, synchronize with latest official rank & title
+    // If staff member, synchronize with latest official rank & title & classes
     const officialStaff = OFFICIAL_STAFF_LIST.find(s => s.identifier === user.identifier);
     if (officialStaff) {
       const fresh = toStaffUserProfile(officialStaff);
@@ -291,6 +291,8 @@ export function getCurrentUser(): UserProfile | null {
       user.title = fresh.title;
       user.role = fresh.role;
       user.subjects = fresh.subjects;
+      user.assignedClasses = fresh.assignedClasses;
+      user.rank = fresh.rank;
     } else if (user.role !== 'student') {
       // If user was removed from official list (e.g. replaced staff), log them out
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
@@ -338,6 +340,8 @@ export function getAllUsers(): UserProfile[] {
           role: fresh.role,
           title: fresh.title,
           subjects: fresh.subjects,
+          assignedClasses: fresh.assignedClasses,
+          rank: fresh.rank,
         };
       }
       return u;
@@ -577,6 +581,8 @@ export function loginOrRegisterStaff(
                   role: freshProfile.role,
                   title: freshProfile.title,
                   subjects: freshProfile.subjects,
+                  assignedClasses: freshProfile.assignedClasses,
+                  rank: freshProfile.rank,
                 }
               : {}),
           }
