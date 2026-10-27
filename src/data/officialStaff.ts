@@ -180,8 +180,19 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     role: 'teacher',
     grade: 1,
     effectiveDate: '2025-06-11',
-    email: 'othmane.benouda@education.dz',
-    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '3AM-2', '4AM-1', '4AM-2', '4AM-3'],
+    assignedClasses: [
+      '1AM-1',
+      '1AM-2',
+      '1AM-3',
+      '2AM-1',
+      '2AM-2',
+      '2AM-3',
+      '3AM-1',
+      '3AM-2',
+      '4AM-1',
+      '4AM-2',
+      '4AM-3',
+    ], // كافة أقسام المؤسسة (11 قسماً) - التربية البدنية والرياضية
   },
   {
     identifier: '1199348010004800',
@@ -319,20 +330,6 @@ export const OFFICIAL_STAFF_LIST: OfficialStaffMember[] = [
     effectiveDate: '2025-01-01',
     email: 'haddah.belalia@education.dz',
     assignedClasses: ['1AM-1', '1AM-2', '2AM-1'], // 1م1، 1م2، 2م1 (جداه بلعاليا)
-  },
-  {
-    identifier: '1096848010025200',
-    surname: 'سوداني بن عودة',
-    firstName: 'بن عودة',
-    birthDate: '1968-01-29',
-    rank: 'أستاذ مميز في التعليم المتوسط',
-    subjectName: 'التربية البدنية والرياضية',
-    subjectId: 'sport',
-    role: 'teacher',
-    grade: 12,
-    effectiveDate: '2025-01-01',
-    email: 'soudani.benouda@education.dz',
-    assignedClasses: ['1AM-1', '1AM-2', '1AM-3', '2AM-1', '2AM-2', '2AM-3', '3AM-1', '3AM-2', '4AM-1', '4AM-2', '4AM-3'],
   },
   {
     identifier: '1198048010203300',

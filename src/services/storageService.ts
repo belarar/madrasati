@@ -347,7 +347,7 @@ export function getAllUsers(): UserProfile[] {
       return u;
     });
 
-    // Ensure all 435 official users are present
+    // Ensure all official users (staff + students) are present
     const storedIds = new Set(syncedUsers.map(u => u.identifier));
     const missing = MOCK_USERS.filter(u => !storedIds.has(u.identifier));
 
@@ -564,7 +564,7 @@ export function loginOrRegisterStaff(
 
     const users = getAllUsers();
 
-    // 1. Check if identifier is in OFFICIAL_STAFF_LIST (All 42 official professors & administration)
+    // 1. Check if identifier is in OFFICIAL_STAFF_LIST (All official professors & administration)
     const officialStaff = OFFICIAL_STAFF_LIST.find(
       s => s.identifier.toLowerCase() === cleanId || s.identifier === identifier.trim()
     );
@@ -1574,7 +1574,7 @@ export function updateCurrentUserPassword(newPass: string): { success: boolean; 
   return directResetPassword(current.identifier, current.email || '', cleanPass);
 }
 
-// ================= إدارة حسابات وكلمات سر الطاقم المهني (42 موظفاً) =================
+// ================= إدارة حسابات وكلمات سر الطاقم المهني =================
 
 export interface StaffAccountItem {
   identifier: string;

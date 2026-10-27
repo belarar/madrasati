@@ -46,16 +46,16 @@ export const SCHOOL_CLASSES: SchoolClass[] = [
 
 // Clean authentic baseline users (قاعدة بيانات المستخدمين المعتمدين الحصرية لمتوسطة الشهيد بن نعمة مصطفى)
 export const MOCK_USERS: UserProfile[] = [
-  // 1. All Official 42 Staff Members (السادة المدير والناظر والأساتذة والمشرفون والطاقم الإداري والعمال)
+  // 1. All Official 41 Staff Members (السادة المدير والناظر والأساتذة والمشرفون والطاقم الإداري والعمال)
   ...OFFICIAL_STAFF_LIST.map(toStaffUserProfile),
 
   // 2. All Official 393 Students from Ministry lists (التلاميذ المسجلون رسمياً في المؤسسة فقط)
   ...OFFICIAL_STUDENTS_LIST.map(toUserProfile),
 ];
 
-export const TOTAL_OFFICIAL_STAFF_COUNT = OFFICIAL_STAFF_LIST.length; // 42
+export const TOTAL_OFFICIAL_STAFF_COUNT = OFFICIAL_STAFF_LIST.length; // 41
 export const TOTAL_OFFICIAL_STUDENTS_COUNT = OFFICIAL_STUDENTS_LIST.length; // 393
-export const TOTAL_AUTHORIZED_USERS_COUNT = MOCK_USERS.length; // 435
+export const TOTAL_AUTHORIZED_USERS_COUNT = MOCK_USERS.length; // 434
 
 // Map for instant O(1) identifier verification
 export const AUTHORIZED_IDENTIFIERS_MAP = new Map<string, UserProfile>(
