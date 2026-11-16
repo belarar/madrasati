@@ -75,6 +75,11 @@ export interface FirestorePasswordResetRequest {
   resolvedAt?: string;
 }
 
+export interface FirestoreStaffPinRecord {
+  pin: string;
+  updatedAt: string;
+}
+
 let isInitialized = false;
 
 // Real-time synchronization listeners
@@ -85,7 +90,7 @@ export function initFirestoreRealtimeSync(callbacks: {
   onPeerExchanges: (posts: PeerExchangePost[]) => void;
   onNotifications: (notifs: AppNotification[]) => void;
   onPasswordResetRequests?: (requests: FirestorePasswordResetRequest[]) => void;
-  onStaffPins?: (pins: Record<string, string>) => void;
+  onStaffPins?: (pins: Record<string, FirestoreStaffPinRecord>) => void;
 }) {
   if (isInitialized) return;
   isInitialized = true;
@@ -196,11 +201,14 @@ export function initFirestoreRealtimeSync(callbacks: {
     onSnapshot(
       staffPinsCol,
       snapshot => {
-        const pins: Record<string, string> = {};
+        const pins: Record<string, FirestoreStaffPinRecord> = {};
         snapshot.forEach(d => {
           const data = d.data();
-          if (data && typeof data.pin === 'string') {
-            pins[d.id.toLowerCase()] = data.pin;
+          if (data && typeof data.pin === 'string' && data.pin.trim().length >= 4) {
+            pins[d.id.toLowerCase()] = {
+              pin: data.pin.trim(),
+              updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : new Date(0).toISOString(),
+            };
           }
         });
         callbacks.onStaffPins?.(pins);
@@ -404,8 +412,57 @@ export async function deletePeerPostFromFirestore(postId: string): Promise<void>
 }
 
 // ================= Password Reset Requests & Staff Security =================
+export async function resolvePendingResetRequestsForIdentifierInFirestore(
+  identifier: string,
+  status: 'approved' | 'rejected' = 'approved',
+  excludeRequestId?: string
+): Promise<void> {
+  if (!identifier) return;
+  const cleanId = identifier.trim().toLowerCase();
+  try {
+    const snapshot = await getDocs(resetRequestsCol);
+    const nowIso = new Date().toISOString();
+    const ops: Promise<void>[] = [];
+    snapshot.forEach(d => {
+      const data = d.data() as FirestorePasswordResetRequest;
+      if (
+        d.id !== excludeRequestId &&
+        data?.identifier?.toLowerCase() === cleanId &&
+        data.status === 'pending'
+      ) {
+        ops.push(
+          setDoc(
+            doc(firestore, 'password_reset_requests', d.id),
+            { status, resolvedAt: nowIso },
+            { merge: true }
+          )
+        );
+      }
+    });
+    if (ops.length > 0) {
+      await Promise.all(ops);
+    }
+  } catch (err) {
+    console.warn('[Firestore] Error resolving pending reset requests:', err);
+  }
+}
+
 export async function savePasswordResetRequestToFirestore(req: FirestorePasswordResetRequest): Promise<void> {
   try {
+    // Supersede any stale pending requests for the same identifier so only the latest request remains pending
+    const snapshot = await getDocs(resetRequestsCol);
+    const cleanId = req.identifier.trim().toLowerCase();
+    const cleanOps: Promise<void>[] = [];
+    snapshot.forEach(d => {
+      const data = d.data() as FirestorePasswordResetRequest;
+      if (d.id !== req.id && data?.identifier?.toLowerCase() === cleanId && data.status === 'pending') {
+        cleanOps.push(deleteDoc(doc(firestore, 'password_reset_requests', d.id)));
+      }
+    });
+    if (cleanOps.length > 0) {
+      await Promise.all(cleanOps);
+    }
+
     await setDoc(doc(firestore, 'password_reset_requests', req.id), req);
     // Send high-priority notification to the Director
     const notifId = `notif-reset-${req.id}`;
@@ -425,15 +482,22 @@ export async function savePasswordResetRequestToFirestore(req: FirestorePassword
 }
 
 export async function approvePasswordResetRequestInFirestore(req: FirestorePasswordResetRequest): Promise<void> {
+  const nowIso = req.resolvedAt || new Date().toISOString();
   try {
-    await updateDoc(doc(firestore, 'password_reset_requests', req.id), {
-      status: 'approved',
-      resolvedAt: new Date().toISOString(),
-    });
-    await setDoc(doc(firestore, 'staff_pins', req.identifier.toLowerCase()), {
-      identifier: req.identifier,
-      pin: req.requestedPin,
-      updatedAt: new Date().toISOString(),
+    await setDoc(
+      doc(firestore, 'password_reset_requests', req.id),
+      {
+        ...req,
+        status: 'approved',
+        resolvedAt: nowIso,
+      },
+      { merge: true }
+    );
+    await resolvePendingResetRequestsForIdentifierInFirestore(req.identifier, 'approved', req.id);
+    await setDoc(doc(firestore, 'staff_pins', req.identifier.trim().toLowerCase()), {
+      identifier: req.identifier.trim(),
+      pin: req.requestedPin.trim(),
+      updatedAt: nowIso,
     });
   } catch (err) {
     console.warn('[Firestore] Error approving reset request:', err);
@@ -442,10 +506,14 @@ export async function approvePasswordResetRequestInFirestore(req: FirestorePassw
 
 export async function rejectPasswordResetRequestInFirestore(requestId: string): Promise<void> {
   try {
-    await updateDoc(doc(firestore, 'password_reset_requests', requestId), {
-      status: 'rejected',
-      resolvedAt: new Date().toISOString(),
-    });
+    await setDoc(
+      doc(firestore, 'password_reset_requests', requestId),
+      {
+        status: 'rejected',
+        resolvedAt: new Date().toISOString(),
+      },
+      { merge: true }
+    );
   } catch (err) {
     console.warn('[Firestore] Error rejecting reset request:', err);
   }
@@ -474,16 +542,71 @@ export async function fetchPasswordResetRequestsFromFirestore(): Promise<Firesto
   }
 }
 
-export async function saveStaffPinToFirestore(identifier: string, pin: string): Promise<void> {
+export async function saveStaffPinToFirestore(identifier: string, pin: string, updatedAt?: string): Promise<void> {
+  const cleanId = identifier.trim().toLowerCase();
+  const cleanPin = pin.trim();
+  const nowIso = updatedAt || new Date().toISOString();
   try {
-    await setDoc(doc(firestore, 'staff_pins', identifier.toLowerCase()), {
-      identifier,
-      pin,
-      updatedAt: new Date().toISOString(),
+    await setDoc(doc(firestore, 'staff_pins', cleanId), {
+      identifier: identifier.trim(),
+      pin: cleanPin,
+      updatedAt: nowIso,
     });
   } catch (err) {
     console.warn('[Firestore] Error saving staff pin:', err);
   }
+}
+
+export async function fetchStaffPinFromFirestore(identifier: string): Promise<FirestoreStaffPinRecord | null> {
+  const cleanId = identifier.trim().toLowerCase();
+  if (!cleanId) return null;
+  const ref = doc(firestore, 'staff_pins', cleanId);
+  try {
+    const snap = await getDocFromServer(ref);
+    if (snap.exists()) {
+      const data = snap.data();
+      if (data && typeof data.pin === 'string' && data.pin.trim().length >= 4) {
+        return {
+          pin: data.pin.trim(),
+          updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : new Date(0).toISOString(),
+        };
+      }
+    }
+    return null;
+  } catch {
+    try {
+      const snap = await getDoc(ref);
+      if (snap.exists()) {
+        const data = snap.data();
+        if (data && typeof data.pin === 'string' && data.pin.trim().length >= 4) {
+          return {
+            pin: data.pin.trim(),
+            updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : new Date(0).toISOString(),
+          };
+        }
+      }
+    } catch {}
+    return null;
+  }
+}
+
+export async function fetchAllStaffPinsFromFirestore(): Promise<Record<string, FirestoreStaffPinRecord>> {
+  const pins: Record<string, FirestoreStaffPinRecord> = {};
+  try {
+    const snapshot = await getDocs(staffPinsCol);
+    snapshot.forEach(d => {
+      const data = d.data();
+      if (data && typeof data.pin === 'string' && data.pin.trim().length >= 4) {
+        pins[d.id.toLowerCase()] = {
+          pin: data.pin.trim(),
+          updatedAt: typeof data.updatedAt === 'string' ? data.updatedAt : new Date(0).toISOString(),
+        };
+      }
+    });
+  } catch (err) {
+    console.warn('[Firestore] Error fetching all staff pins:', err);
+  }
+  return pins;
 }
 
 // ================= Private Student Conversations =================

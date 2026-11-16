@@ -45,6 +45,7 @@ export interface SchoolDatabase {
   privateMessages: any[];
   notifications: AppNotification[];
   userCustomPins: Record<string, string>; // identifier -> custom password
+  userCustomPinTimestamps?: Record<string, string>; // identifier -> ISO timestamp
   passwordResetRequests: PasswordResetRequest[];
 }
 
@@ -72,6 +73,7 @@ function loadDatabase(): SchoolDatabase {
         if (!Array.isArray(parsed.privateConversations)) parsed.privateConversations = [];
         if (!Array.isArray(parsed.privateMessages)) parsed.privateMessages = [];
         if (!parsed.userCustomPins) parsed.userCustomPins = {};
+        if (!parsed.userCustomPinTimestamps) parsed.userCustomPinTimestamps = {};
         if (!Array.isArray(parsed.passwordResetRequests)) parsed.passwordResetRequests = [];
         if (!Array.isArray(parsed.internalStaffSummons)) parsed.internalStaffSummons = [];
 
@@ -195,6 +197,7 @@ function loadDatabase(): SchoolDatabase {
       },
     ],
     userCustomPins: {},
+    userCustomPinTimestamps: {},
     passwordResetRequests: [],
   };
 
@@ -241,6 +244,7 @@ app.get('/api/sync', (req, res) => {
     privateMessages: db.privateMessages,
     notifications: db.notifications,
     userCustomPins: db.userCustomPins,
+    userCustomPinTimestamps: db.userCustomPinTimestamps || {},
     passwordResetRequests: db.passwordResetRequests || [],
     serverTime: new Date().toISOString(),
   });
@@ -363,6 +367,7 @@ app.post('/api/sync', (req, res) => {
     privateMessages: db.privateMessages,
     notifications: db.notifications,
     userCustomPins: db.userCustomPins,
+    userCustomPinTimestamps: db.userCustomPinTimestamps || {},
     passwordResetRequests: db.passwordResetRequests || [],
     serverTime: new Date().toISOString(),
   });
@@ -976,14 +981,30 @@ app.get('/api/users/pins', (req, res) => {
 });
 
 app.post('/api/users/update-password', (req, res) => {
-  const { identifier, pin } = req.body;
-  if (!identifier || !pin || pin.length < 4) {
+  const { identifier, pin, updatedAt } = req.body || {};
+  if (!identifier || !pin || String(pin).trim().length < 4) {
     return res.status(400).json({ error: 'كلمة السر يجب أن تتكون من 4 خانات على الأقل.' });
   }
 
-  db.userCustomPins[identifier.toLowerCase()] = pin.trim();
+  const cleanId = String(identifier).trim().toLowerCase();
+  const cleanPin = String(pin).trim();
+  const nowIso = typeof updatedAt === 'string' && updatedAt ? updatedAt : new Date().toISOString();
+
+  if (!db.userCustomPinTimestamps) db.userCustomPinTimestamps = {};
+  db.userCustomPins[cleanId] = cleanPin;
+  db.userCustomPinTimestamps[cleanId] = nowIso;
+
+  // Automatically mark any pending reset requests for this identifier as approved
+  if (Array.isArray(db.passwordResetRequests)) {
+    db.passwordResetRequests = db.passwordResetRequests.map(r =>
+      r.identifier && r.identifier.trim().toLowerCase() === cleanId && r.status === 'pending'
+        ? { ...r, status: 'approved', resolvedAt: nowIso }
+        : r
+    );
+  }
+
   saveDatabase(db);
-  res.json({ success: true, identifier: identifier.toLowerCase() });
+  res.json({ success: true, identifier: cleanId, updatedAt: nowIso });
 });
 
 // 9. Password Reset Requests API (Staff requests reset -> Director must approve & activate)
@@ -1005,8 +1026,9 @@ app.post('/api/password-reset-requests', (req, res) => {
   }
 
   const cleanId = identifier.trim().toLowerCase();
-  const existingPendingIdx = db.passwordResetRequests.findIndex(
-    r => r.identifier.toLowerCase() === cleanId && r.status === 'pending'
+  // Remove any previous pending requests for this staff member so only the newest stays pending
+  db.passwordResetRequests = db.passwordResetRequests.filter(
+    r => !(r.identifier && r.identifier.trim().toLowerCase() === cleanId && r.status === 'pending')
   );
 
   const reqId = id || `reset-req-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`;
@@ -1021,15 +1043,7 @@ app.post('/api/password-reset-requests', (req, res) => {
     status: 'pending',
   };
 
-  if (existingPendingIdx >= 0) {
-    // Update existing pending request
-    db.passwordResetRequests[existingPendingIdx] = {
-      ...db.passwordResetRequests[existingPendingIdx],
-      ...requestItem,
-    };
-  } else {
-    db.passwordResetRequests.unshift(requestItem);
-  }
+  db.passwordResetRequests.unshift(requestItem);
 
   // Also push a high-priority notification to the director
   if (!Array.isArray(db.notifications)) {
@@ -1059,19 +1073,46 @@ app.post('/api/password-reset-requests/:id/approve', (req, res) => {
     db.passwordResetRequests = [];
   }
 
-  const target = db.passwordResetRequests.find(r => r.id === id);
+  let target = db.passwordResetRequests.find(r => r.id === id);
+  const nowIso = new Date().toISOString();
+
+  if (!target && req.body && req.body.identifier && req.body.requestedPin) {
+    target = {
+      id,
+      identifier: String(req.body.identifier).trim(),
+      staffName: req.body.staffName || 'أستاذ / موظف',
+      staffRank: req.body.staffRank || 'طاقم تربوي',
+      requestedPin: String(req.body.requestedPin).trim(),
+      requestDate: req.body.requestDate || nowIso,
+      note: req.body.note,
+      status: 'approved',
+      resolvedAt: nowIso,
+    };
+    db.passwordResetRequests.unshift(target);
+  }
+
   if (!target) {
     return res.status(404).json({ error: 'لم يتم العثور على هذا الطلب.' });
   }
 
   target.status = 'approved';
-  target.resolvedAt = new Date().toISOString();
+  target.resolvedAt = nowIso;
 
-  // Apply new PIN immediately to userCustomPins
-  db.userCustomPins[target.identifier.toLowerCase()] = target.requestedPin.trim();
+  const cleanId = target.identifier.trim().toLowerCase();
+  // Resolve any other pending requests for this same staff member
+  db.passwordResetRequests = db.passwordResetRequests.map(r =>
+    r.identifier && r.identifier.trim().toLowerCase() === cleanId && r.status === 'pending'
+      ? { ...r, status: 'approved', resolvedAt: nowIso }
+      : r
+  );
+
+  // Apply new PIN immediately to userCustomPins with timestamp
+  if (!db.userCustomPinTimestamps) db.userCustomPinTimestamps = {};
+  db.userCustomPins[cleanId] = target.requestedPin.trim();
+  db.userCustomPinTimestamps[cleanId] = nowIso;
   saveDatabase(db);
 
-  res.json({ success: true, identifier: target.identifier, pin: target.requestedPin });
+  res.json({ success: true, identifier: target.identifier, pin: target.requestedPin, updatedAt: nowIso });
 });
 
 app.post('/api/password-reset-requests/:id/reject', (req, res) => {

@@ -32,13 +32,16 @@ import {
   deletePeerPostFromFirestore,
   deletePrivateConversationFromFirestore,
   deleteSummonFromFirestore,
+  fetchAllStaffPinsFromFirestore,
   fetchFilePayloadFromFirestore,
+  fetchStaffPinFromFirestore,
   incrementDownloadCountInFirestore,
   initFirestoreRealtimeSync,
   initPrivateConversationsSync,
   initPrivateMessagesSync,
   fetchPasswordResetRequestsFromFirestore,
   rejectPasswordResetRequestInFirestore,
+  resolvePendingResetRequestsForIdentifierInFirestore,
   saveAnnouncementToFirestore,
   saveDocumentToFirestore,
   savePasswordResetRequestToFirestore,
@@ -59,6 +62,7 @@ export const STORAGE_KEYS = {
   SUMMONS: 'ben_naama_summons',
   INTERNAL_STAFF_SUMMONS: 'ben_naama_internal_staff_summons',
   USERS: 'ben_naama_users',
+  STAFF_PINS: 'ben_naama_staff_pins',
   PEER_EXCHANGES: 'ben_naama_peer_exchanges',
   NOTIFICATIONS: 'ben_naama_notifications',
   PRIVATE_CONVERSATIONS: 'ben_naama_private_conversations',
@@ -68,11 +72,155 @@ export const STORAGE_KEYS = {
 
 const CLEAN_VERSION_KEY = 'ben_naama_strict_official_v16';
 
+export interface StaffPinRecord {
+  pin: string;
+  updatedAt: string;
+  source?: 'firestore' | 'server' | 'local';
+}
+
 // In-memory cache for live cross-device sync and local quota protection
 let cachedDocuments: SchoolDocument[] | null = null;
 let cachedAnnouncements: SchoolAnnouncement[] | null = null;
 let cachedSummons: ParentSummon[] | null = null;
 let cachedPeerExchanges: PeerExchangePost[] | null = null;
+let cachedStaffPins: Record<string, StaffPinRecord> | null = null;
+
+export function normalizeIdentifier(raw: string): string {
+  if (!raw) return '';
+  return raw
+    .replace(/[\u0660-\u0669]/g, ch => String(ch.charCodeAt(0) - 0x0660))
+    .replace(/[\u06F0-\u06F9]/g, ch => String(ch.charCodeAt(0) - 0x06F0))
+    .replace(/\s+/g, '')
+    .trim()
+    .toLowerCase();
+}
+
+export function getStoredStaffPins(): Record<string, StaffPinRecord> {
+  if (cachedStaffPins) return cachedStaffPins;
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.STAFF_PINS);
+    if (raw) {
+      const parsed = JSON.parse(raw);
+      if (parsed && typeof parsed === 'object') {
+        cachedStaffPins = parsed;
+        return cachedStaffPins!;
+      }
+    }
+  } catch {}
+  cachedStaffPins = {};
+  return cachedStaffPins;
+}
+
+function saveStoredStaffPins(pins: Record<string, StaffPinRecord>): void {
+  cachedStaffPins = pins;
+  try {
+    localStorage.setItem(STORAGE_KEYS.STAFF_PINS, JSON.stringify(pins));
+  } catch {}
+}
+
+export function upsertStoredStaffPin(
+  identifier: string,
+  pin: string,
+  updatedAt?: string,
+  source: 'firestore' | 'server' | 'local' = 'local'
+): boolean {
+  const cleanId = normalizeIdentifier(identifier);
+  const cleanPin = pin ? pin.trim() : '';
+  if (!cleanId || cleanPin.length < 4) return false;
+
+  const current = { ...getStoredStaffPins() };
+  const existing = current[cleanId];
+  const incomingTs = updatedAt ? new Date(updatedAt).getTime() : 0;
+  const existingTs = existing?.updatedAt ? new Date(existing.updatedAt).getTime() : 0;
+
+  let shouldUpdate = false;
+  if (!existing) {
+    shouldUpdate = true;
+  } else if (source === 'local') {
+    shouldUpdate = true;
+  } else if (incomingTs > 0 && incomingTs >= existingTs) {
+    shouldUpdate = true;
+  } else if (source === 'firestore' && existingTs === 0) {
+    // Firestore explicit timestamp beats untimestamped legacy entries
+    shouldUpdate = true;
+  }
+
+  if (!shouldUpdate && existing?.pin === cleanPin) {
+    return false;
+  }
+  if (!shouldUpdate) {
+    return false;
+  }
+
+  current[cleanId] = {
+    pin: cleanPin,
+    updatedAt: updatedAt || new Date().toISOString(),
+    source,
+  };
+  saveStoredStaffPins(current);
+  return true;
+}
+
+export function getEffectiveStaffPin(identifier: string, fallbackPin?: string): string | undefined {
+  const cleanId = normalizeIdentifier(identifier);
+  const record = getStoredStaffPins()[cleanId];
+  if (record?.pin && record.pin.trim().length >= 4) {
+    return record.pin.trim();
+  }
+  return fallbackPin && fallbackPin.trim().length >= 4 ? fallbackPin.trim() : undefined;
+}
+
+function mergePasswordResetRequests(
+  baseList: PasswordResetRequest[],
+  incomingList: PasswordResetRequest[]
+): PasswordResetRequest[] {
+  const map = new Map<string, PasswordResetRequest>();
+
+  const applyItem = (item: PasswordResetRequest) => {
+    if (!item || !item.id) return;
+    const prev = map.get(item.id);
+    if (!prev) {
+      map.set(item.id, item);
+      return;
+    }
+    // Resolved status (approved/rejected) ALWAYS beats pending
+    if (prev.status === 'pending' && item.status !== 'pending') {
+      map.set(item.id, item);
+      return;
+    }
+    if (prev.status !== 'pending' && item.status === 'pending') {
+      return;
+    }
+    const prevTime = new Date(prev.resolvedAt || prev.requestDate).getTime();
+    const itemTime = new Date(item.resolvedAt || item.requestDate).getTime();
+    if (itemTime >= prevTime) {
+      map.set(item.id, item);
+    }
+  };
+
+  baseList.forEach(applyItem);
+  incomingList.forEach(applyItem);
+
+  const staffPins = getStoredStaffPins();
+  const merged = Array.from(map.values()).map(req => {
+    if (req.status === 'pending') {
+      const cleanId = normalizeIdentifier(req.identifier);
+      const pinRec = staffPins[cleanId];
+      // If a staff pin was updated/activated AFTER or AT this pending request's time, mark it resolved
+      if (pinRec?.updatedAt) {
+        const pinTime = new Date(pinRec.updatedAt).getTime();
+        const reqTime = new Date(req.requestDate).getTime();
+        if (!Number.isNaN(pinTime) && !Number.isNaN(reqTime) && pinTime >= reqTime) {
+          return { ...req, status: 'approved' as const, resolvedAt: pinRec.updatedAt };
+        }
+      }
+    }
+    return req;
+  });
+
+  merged.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+  return merged;
+}
 
 // Initialize Storage with clean baseline & start cross-device sync
 export function initStorage(): void {
@@ -224,28 +372,57 @@ export function initStorage(): void {
       onPasswordResetRequests: (liveRequests) => {
         if (Array.isArray(liveRequests)) {
           const prev = getPasswordResetRequests();
+          const merged = mergePasswordResetRequests(prev, liveRequests as PasswordResetRequest[]);
           const prevStr = JSON.stringify(prev.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
-          const nextStr = JSON.stringify(liveRequests.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
+          const nextStr = JSON.stringify(merged.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
           if (prevStr !== nextStr) {
-            safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(liveRequests));
+            safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(merged));
             window.dispatchEvent(new CustomEvent('password-requests-updated'));
+          }
+          // If any approved requests exist in Firestore, ensure their PIN is also stored
+          let pinChanged = false;
+          liveRequests.forEach(r => {
+            if (r.status === 'approved' && r.requestedPin && r.requestedPin.trim().length >= 4) {
+              if (upsertStoredStaffPin(r.identifier, r.requestedPin, r.resolvedAt || r.requestDate, 'firestore')) {
+                pinChanged = true;
+              }
+            }
+          });
+          if (pinChanged) {
+            window.dispatchEvent(new CustomEvent('password-requests-updated'));
+            window.dispatchEvent(new Event('auth-change'));
           }
         }
       },
       onStaffPins: (livePins) => {
         if (livePins && typeof livePins === 'object') {
+          let pinChanged = false;
+          for (const [id, rec] of Object.entries(livePins)) {
+            if (rec && rec.pin && upsertStoredStaffPin(id, rec.pin, rec.updatedAt, 'firestore')) {
+              pinChanged = true;
+            }
+          }
           const users = getAllUsers();
           let changed = false;
           const updatedUsers = users.map(u => {
-            const customPin = livePins[u.identifier.toLowerCase()];
-            if (customPin && u.pin !== customPin) {
+            const effective = getEffectiveStaffPin(u.identifier, u.pin);
+            if (effective && u.pin !== effective) {
               changed = true;
-              return { ...u, pin: customPin };
+              return { ...u, pin: effective };
             }
             return u;
           });
           if (changed) {
             safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+          }
+          if (changed || pinChanged) {
+            // Re-evaluate pending requests against updated pin timestamps
+            const currentReqs = getPasswordResetRequests();
+            const reconciled = mergePasswordResetRequests(currentReqs, []);
+            if (JSON.stringify(currentReqs) !== JSON.stringify(reconciled)) {
+              safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(reconciled));
+            }
+            window.dispatchEvent(new CustomEvent('password-requests-updated'));
             window.dispatchEvent(new Event('auth-change'));
           }
         }
@@ -315,9 +492,16 @@ export function setCurrentUser(user: UserProfile | null): void {
 }
 
 export function getAllUsers(): UserProfile[] {
+  const applyPinOverrides = (list: UserProfile[]) =>
+    list.map(u => {
+      if (u.role === 'student') return u;
+      const effectivePin = getEffectiveStaffPin(u.identifier, u.pin);
+      return effectivePin && effectivePin !== u.pin ? { ...u, pin: effectivePin } : u;
+    });
+
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.USERS);
-    if (!raw) return MOCK_USERS;
+    if (!raw) return applyPinOverrides(MOCK_USERS);
     const parsed: UserProfile[] = JSON.parse(raw);
 
     // Strictly retain ONLY official staff and official students of the school
@@ -334,6 +518,7 @@ export function getAllUsers(): UserProfile[] {
       const match = staffMap.get(u.identifier);
       if (match) {
         const fresh = toStaffUserProfile(match);
+        const effectivePin = getEffectiveStaffPin(u.identifier, u.pin || fresh.pin);
         return {
           ...u,
           name: fresh.name,
@@ -342,6 +527,7 @@ export function getAllUsers(): UserProfile[] {
           subjects: fresh.subjects,
           assignedClasses: fresh.assignedClasses,
           rank: fresh.rank,
+          pin: effectivePin,
         };
       }
       return u;
@@ -349,11 +535,11 @@ export function getAllUsers(): UserProfile[] {
 
     // Ensure all official users (staff + students) are present
     const storedIds = new Set(syncedUsers.map(u => u.identifier));
-    const missing = MOCK_USERS.filter(u => !storedIds.has(u.identifier));
+    const missing = applyPinOverrides(MOCK_USERS.filter(u => !storedIds.has(u.identifier)));
 
     return [...syncedUsers, ...missing];
   } catch {
-    return MOCK_USERS;
+    return applyPinOverrides(MOCK_USERS);
   }
 }
 
@@ -464,7 +650,10 @@ export function registerNewUser(newUser: UserProfile): UserProfile {
     ? users.map(u => (u.identifier.toLowerCase() === newUser.identifier.toLowerCase() ? newUser : u))
     : [newUser, ...users];
 
-  localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updated));
+  safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updated));
+  if (newUser.role !== 'student' && newUser.pin && newUser.pin.trim().length >= 4) {
+    upsertStoredStaffPin(newUser.identifier, newUser.pin.trim(), new Date().toISOString(), 'local');
+  }
   setCurrentUser(newUser);
   window.dispatchEvent(new Event('auth-change'));
   return newUser;
@@ -553,7 +742,7 @@ export function loginOrRegisterStaff(
     notFound?: boolean;
     enteredIdentifier?: string;
   } {
-    const cleanId = identifier.trim().toLowerCase();
+    const cleanId = normalizeIdentifier(identifier);
 
     if (!cleanId) {
       return {
@@ -566,9 +755,9 @@ export function loginOrRegisterStaff(
 
     // 1. Check if identifier is in OFFICIAL_STAFF_LIST (All official professors & administration)
     const officialStaff = OFFICIAL_STAFF_LIST.find(
-      s => s.identifier.toLowerCase() === cleanId || s.identifier === identifier.trim()
+      s => normalizeIdentifier(s.identifier) === cleanId || s.identifier === identifier.trim()
     );
-    const existingStaffUser = users.find(u => u.identifier.toLowerCase() === cleanId);
+    const existingStaffUser = users.find(u => normalizeIdentifier(u.identifier) === cleanId);
 
     if (officialStaff || (existingStaffUser && existingStaffUser.role !== 'student')) {
       const freshProfile = officialStaff ? toStaffUserProfile(officialStaff) : undefined;
@@ -603,12 +792,33 @@ export function loginOrRegisterStaff(
       };
     }
 
-    // If staff user already has a configured password in storage
-    const pendingReq = getPasswordResetRequests().find(
-      r => r.identifier.toLowerCase() === cleanId && r.status === 'pending'
-    );
+    const pinRecord = getStoredStaffPins()[cleanId];
+    const pinUpdatedAtMs = pinRecord?.updatedAt ? new Date(pinRecord.updatedAt).getTime() : 0;
+    let effectivePin = getEffectiveStaffPin(cleanId, staffUser.pin);
 
-    if (pendingReq && enteredPin === pendingReq.requestedPin) {
+    // Check latest approved request in case staff_pins sync lagged behind password_reset_requests
+    const allReqs = getPasswordResetRequests();
+    const userReqs = allReqs.filter(r => normalizeIdentifier(r.identifier) === cleanId);
+    const latestApprovedReq = userReqs.find(r => r.status === 'approved');
+    if (latestApprovedReq && latestApprovedReq.requestedPin?.trim().length >= 4) {
+      const approvedMs = new Date(latestApprovedReq.resolvedAt || latestApprovedReq.requestDate).getTime();
+      if (!effectivePin || (approvedMs > pinUpdatedAtMs && approvedMs > 0)) {
+        effectivePin = latestApprovedReq.requestedPin.trim();
+        upsertStoredStaffPin(cleanId, effectivePin, latestApprovedReq.resolvedAt || latestApprovedReq.requestDate, 'firestore');
+      }
+    }
+
+    // Only consider a pending request active if it was created AFTER the latest PIN activation/update
+    const activePendingReq = userReqs.find(r => {
+      if (r.status !== 'pending') return false;
+      const reqMs = new Date(r.requestDate).getTime();
+      if (pinUpdatedAtMs > 0 && !Number.isNaN(reqMs) && pinUpdatedAtMs >= reqMs) {
+        return false;
+      }
+      return true;
+    });
+
+    if (activePendingReq && enteredPin === activePendingReq.requestedPin.trim()) {
       return {
         success: false,
         message:
@@ -616,9 +826,9 @@ export function loginOrRegisterStaff(
       };
     }
 
-    if (staffUser.pin) {
-      if (enteredPin !== staffUser.pin) {
-        if (pendingReq) {
+    if (effectivePin) {
+      if (enteredPin !== effectivePin) {
+        if (activePendingReq) {
           return {
             success: false,
             message:
@@ -631,11 +841,19 @@ export function loginOrRegisterStaff(
             '⛔ كلمة السر غير صحيحة. يرجى التأكد من كتابة كلمة السر بدقة، أو الضغط على "طلب إعادة تعيين كلمة السر" أسفل الشاشة لطلب تفعيلها من المدير.',
         };
       }
+      staffUser.pin = effectivePin;
     } else {
       // First-time login for this official staff member:
-      // Save this chosen password (4+ chars) as their personal official password!
+      // Save this chosen password (4+ chars) as their personal official password across local, cloud & server!
+      const nowIso = new Date().toISOString();
       staffUser.pin = enteredPin;
-      registerNewUser(staffUser);
+      upsertStoredStaffPin(cleanId, enteredPin, nowIso, 'local');
+      saveStaffPinToFirestore(staffUser.identifier, enteredPin, nowIso).catch(() => {});
+      fetch('/api/users/update-password', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ identifier: staffUser.identifier, pin: enteredPin, updatedAt: nowIso }),
+      }).catch(() => {});
     }
 
     registerNewUser(staffUser);
@@ -645,7 +863,7 @@ export function loginOrRegisterStaff(
 
   // 2. Check if identifier is an enrolled official student in OFFICIAL_STUDENTS_LIST
   const officialStudent = OFFICIAL_STUDENTS_LIST.find(
-    s => s.identifier === cleanId || s.identifier === identifier.trim()
+    s => normalizeIdentifier(s.identifier) === cleanId || s.identifier === identifier.trim()
   );
   if (officialStudent) {
     const studentUser = toUserProfile(officialStudent);
@@ -662,6 +880,57 @@ export function loginOrRegisterStaff(
     message:
       '⛔ عذراً، رقم التعريف المدخل غير مسجل في السجلات الرسمية لمتوسطة الشهيد بن نعمة مصطفى. لا يُسمح بالدخول إلى المنصة إلا للتلاميذ المسجلين رسمياً والموظفين المعتمدين.',
   };
+}
+
+// Live cloud + server verification before authenticating staff so Director approvals take effect immediately across devices
+export async function authenticateUserAsync(
+  identifier: string,
+  pin?: string
+): Promise<{
+  success: boolean;
+  user?: UserProfile;
+  message?: string;
+  notFound?: boolean;
+  enteredIdentifier?: string;
+}> {
+  const cleanId = normalizeIdentifier(identifier);
+  if (cleanId) {
+    const syncTasks = Promise.allSettled([
+      fetchStaffPinFromFirestore(cleanId).then(rec => {
+        if (rec && rec.pin) {
+          upsertStoredStaffPin(cleanId, rec.pin, rec.updatedAt, 'firestore');
+        }
+      }),
+      fetchPasswordResetRequestsFromServer(),
+      fetch('/api/sync')
+        .then(r => (r.ok ? r.json() : null))
+        .then(data => {
+          if (!data || typeof data !== 'object') return;
+          if (data.userCustomPins && typeof data.userCustomPins === 'object') {
+            const customPin = data.userCustomPins[cleanId];
+            const ts = data.userCustomPinTimestamps?.[cleanId];
+            if (customPin && typeof customPin === 'string') {
+              upsertStoredStaffPin(cleanId, customPin, ts, 'server');
+            }
+          }
+          if (Array.isArray(data.passwordResetRequests)) {
+            const merged = mergePasswordResetRequests(
+              getPasswordResetRequests(),
+              data.passwordResetRequests
+            );
+            safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(merged));
+          }
+        }),
+    ]);
+
+    // Guard against slow/offline network so login never hangs
+    await Promise.race([
+      syncTasks,
+      new Promise<void>(resolve => setTimeout(resolve, 3500)),
+    ]);
+  }
+
+  return authenticateUser(identifier, pin);
 }
 
 // Safe localStorage setter with QuotaExceeded fallback protection
@@ -1594,7 +1863,7 @@ export function getOfficialStaffAccountList(): StaffAccountItem[] {
   const users = getAllUsers();
   return OFFICIAL_STAFF_LIST.map(member => {
     const userMatch = users.find(u => u.identifier.toLowerCase() === member.identifier.toLowerCase());
-    const pin = (userMatch && userMatch.pin) ? userMatch.pin : member.pin;
+    const pin = getEffectiveStaffPin(member.identifier, (userMatch && userMatch.pin) ? userMatch.pin : member.pin);
     return {
       identifier: member.identifier,
       surname: member.surname,
@@ -1612,15 +1881,15 @@ export function getOfficialStaffAccountList(): StaffAccountItem[] {
 }
 
 export function setStaffMemberPassword(identifier: string, newPin: string): { success: boolean; message: string; pin?: string } {
-  const cleanId = identifier.trim();
+  const cleanId = normalizeIdentifier(identifier);
   const cleanPin = newPin.trim();
   if (cleanPin.length < 4) {
     return { success: false, message: 'كلمة السر يجب أن تتكون من 4 خانات على الأقل.' };
   }
 
   const users = getAllUsers();
-  const existingIdx = users.findIndex(u => u.identifier.toLowerCase() === cleanId.toLowerCase());
-  const officialMatch = OFFICIAL_STAFF_LIST.find(s => s.identifier.toLowerCase() === cleanId.toLowerCase());
+  const existingIdx = users.findIndex(u => normalizeIdentifier(u.identifier) === cleanId);
+  const officialMatch = OFFICIAL_STAFF_LIST.find(s => normalizeIdentifier(s.identifier) === cleanId);
 
   let targetUser: UserProfile;
   if (existingIdx >= 0) {
@@ -1631,19 +1900,39 @@ export function setStaffMemberPassword(identifier: string, newPin: string): { su
     return { success: false, message: 'لم يتم العثور على الموظف في السجلات.' };
   }
 
+  const nowIso = new Date().toISOString();
+  upsertStoredStaffPin(targetUser.identifier, cleanPin, nowIso, 'local');
+
   const updatedUsers = existingIdx >= 0
     ? users.map((u, i) => (i === existingIdx ? targetUser : u))
     : [targetUser, ...users];
 
   safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+
+  // Automatically resolve any pending password reset requests for this employee so they are never blocked from logging in
+  const currentRequests = getPasswordResetRequests();
+  let requestsUpdated = false;
+  const resolvedRequests = currentRequests.map(r => {
+    if (normalizeIdentifier(r.identifier) === cleanId && r.status === 'pending') {
+      requestsUpdated = true;
+      return { ...r, status: 'approved' as const, resolvedAt: nowIso };
+    }
+    return r;
+  });
+  if (requestsUpdated) {
+    safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(resolvedRequests));
+    window.dispatchEvent(new CustomEvent('password-requests-updated'));
+  }
+
   window.dispatchEvent(new Event('auth-change'));
 
   // Sync to Firestore & backend immediately
-  saveStaffPinToFirestore(cleanId, cleanPin).catch(() => {});
+  saveStaffPinToFirestore(targetUser.identifier, cleanPin, nowIso).catch(() => {});
+  resolvePendingResetRequestsForIdentifierInFirestore(targetUser.identifier, 'approved').catch(() => {});
   fetch('/api/users/update-password', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ identifier: cleanId, pin: cleanPin }),
+    body: JSON.stringify({ identifier: targetUser.identifier, pin: cleanPin, updatedAt: nowIso }),
   }).catch(() => {});
 
   return {
@@ -1679,41 +1968,37 @@ export function getPasswordResetRequests(): PasswordResetRequest[] {
 }
 
 export async function fetchPasswordResetRequestsFromServer(): Promise<PasswordResetRequest[]> {
-  const mergedMap = new Map<string, PasswordResetRequest>();
+  let merged = getPasswordResetRequests();
 
-  // 1. Load from local cache first
-  const localList = getPasswordResetRequests();
-  localList.forEach(r => mergedMap.set(r.id, r));
-
-  // 2. Fetch from Express backend
+  // 1. Fetch from Express backend and merge safely (resolved beats pending)
   try {
     const res = await fetch('/api/password-reset-requests');
     if (res.ok) {
       const serverList = await res.json();
       if (Array.isArray(serverList)) {
-        serverList.forEach((r: PasswordResetRequest) => {
-          if (r && r.id) {
-            mergedMap.set(r.id, r);
-          }
-        });
+        merged = mergePasswordResetRequests(merged, serverList as PasswordResetRequest[]);
       }
     }
   } catch {}
 
-  // 3. Fetch from Firestore (cloud database) for instant cross-device visibility
+  // 2. Fetch from Firestore (cloud database) and merge safely
   try {
     const firestoreList = await fetchPasswordResetRequestsFromFirestore();
     if (Array.isArray(firestoreList)) {
-      firestoreList.forEach(r => {
-        if (r && r.id) {
-          mergedMap.set(r.id, r as PasswordResetRequest);
-        }
-      });
+      merged = mergePasswordResetRequests(merged, firestoreList as PasswordResetRequest[]);
     }
   } catch {}
 
-  const merged = Array.from(mergedMap.values());
-  merged.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
+  // 3. Also sync staff pins from Firestore so Director & Staff always see latest activated pins
+  try {
+    const cloudPins = await fetchAllStaffPinsFromFirestore();
+    for (const [id, rec] of Object.entries(cloudPins)) {
+      if (rec && rec.pin) {
+        upsertStoredStaffPin(id, rec.pin, rec.updatedAt, 'firestore');
+      }
+    }
+    merged = mergePasswordResetRequests(merged, []);
+  } catch {}
 
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(merged));
   window.dispatchEvent(new CustomEvent('password-requests-updated'));
@@ -1725,7 +2010,7 @@ export async function submitPasswordResetRequest(
   requestedPin: string,
   note?: string
 ): Promise<{ success: boolean; message: string; request?: PasswordResetRequest }> {
-  const cleanId = identifier.trim();
+  const cleanId = normalizeIdentifier(identifier);
   const cleanPin = requestedPin.trim();
 
   if (!cleanId) {
@@ -1737,10 +2022,10 @@ export async function submitPasswordResetRequest(
 
   // Verify staff exists in official roster or existing users
   const officialStaff = OFFICIAL_STAFF_LIST.find(
-    s => s.identifier.toLowerCase() === cleanId.toLowerCase()
+    s => normalizeIdentifier(s.identifier) === cleanId
   );
   const users = getAllUsers();
-  const existingUser = users.find(u => u.identifier.toLowerCase() === cleanId.toLowerCase());
+  const existingUser = users.find(u => normalizeIdentifier(u.identifier) === cleanId);
 
   if (!officialStaff && !existingUser) {
     return {
@@ -1749,6 +2034,7 @@ export async function submitPasswordResetRequest(
     };
   }
 
+  const canonicalId = officialStaff?.identifier || existingUser?.identifier || cleanId;
   const staffName = officialStaff
     ? `${officialStaff.surname} ${officialStaff.firstName}`
     : existingUser?.name || 'أستاذ / موظف';
@@ -1756,7 +2042,7 @@ export async function submitPasswordResetRequest(
 
   const newRequest: PasswordResetRequest = {
     id: `reset-req-${Date.now()}-${Math.random().toString(36).substr(2, 5)}`,
-    identifier: cleanId,
+    identifier: canonicalId,
     staffName,
     staffRank,
     requestedPin: cleanPin,
@@ -1765,9 +2051,9 @@ export async function submitPasswordResetRequest(
     status: 'pending',
   };
 
-  // 1. Save to local storage immediately
+  // 1. Save to local storage immediately (supersede older pending requests for this user)
   const currentRequests = getPasswordResetRequests().filter(
-    r => !(r.identifier.toLowerCase() === cleanId.toLowerCase() && r.status === 'pending')
+    r => !(normalizeIdentifier(r.identifier) === cleanId && r.status === 'pending')
   );
   currentRequests.unshift(newRequest);
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
@@ -1791,17 +2077,15 @@ export async function submitPasswordResetRequest(
     window.dispatchEvent(new CustomEvent('notifications-updated'));
   } catch {}
 
-  // 3. Save directly to Cloud Firestore (Real-time sync to Director across devices)
-  savePasswordResetRequestToFirestore(newRequest).catch(() => {});
-
-  // 4. Sync to server backend
-  try {
-    await fetch('/api/password-reset-requests', {
+  // 3. Save directly to Cloud Firestore and Express backend (await both so request reaches Director reliably)
+  await Promise.allSettled([
+    savePasswordResetRequestToFirestore(newRequest),
+    fetch('/api/password-reset-requests', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(newRequest),
-    });
-  } catch {}
+    }),
+  ]);
 
   return {
     success: true,
@@ -1819,18 +2103,44 @@ export async function approvePasswordResetRequest(
     return { success: false, message: 'لم يتم العثور على هذا الطلب.' };
   }
 
-  target.status = 'approved';
-  target.resolvedAt = new Date().toISOString();
-  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(currentRequests));
+  const nowIso = new Date().toISOString();
+  const cleanId = normalizeIdentifier(target.identifier);
+  const updatedTarget: PasswordResetRequest = {
+    ...target,
+    status: 'approved',
+    resolvedAt: nowIso,
+  };
 
-  // Directly set the new password in storage, Firestore and server
+  // Mark target AND any other pending requests for the same identifier as approved
+  const updatedRequests = currentRequests.map(r => {
+    if (r.id === requestId || (normalizeIdentifier(r.identifier) === cleanId && r.status === 'pending')) {
+      return { ...r, status: 'approved' as const, resolvedAt: nowIso };
+    }
+    return r;
+  });
+  safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(updatedRequests));
+
+  // Directly set the new password locally and persist across Firestore and Express server
   setStaffMemberPassword(target.identifier, target.requestedPin);
-  approvePasswordResetRequestInFirestore(target).catch(() => {});
 
-  // Sync approval to server
-  try {
-    await fetch(`/api/password-reset-requests/${requestId}/approve`, { method: 'POST' });
-  } catch {}
+  await Promise.allSettled([
+    approvePasswordResetRequestInFirestore(updatedTarget),
+    saveStaffPinToFirestore(target.identifier, target.requestedPin, nowIso),
+    fetch(`/api/password-reset-requests/${encodeURIComponent(requestId)}/approve`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(updatedTarget),
+    }),
+    fetch('/api/users/update-password', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        identifier: target.identifier,
+        pin: target.requestedPin.trim(),
+        updatedAt: nowIso,
+      }),
+    }),
+  ]);
 
   window.dispatchEvent(new CustomEvent('password-requests-updated'));
   return {
@@ -2182,30 +2492,46 @@ export async function syncWithServer(): Promise<void> {
         }
       }
 
-      // 5. User custom pins
+      // 5. User custom pins (timestamp-aware merge so stale server pins never overwrite newer Firestore approvals)
       if (data.userCustomPins && typeof data.userCustomPins === 'object') {
+        const timestamps: Record<string, string> = data.userCustomPinTimestamps && typeof data.userCustomPinTimestamps === 'object'
+          ? data.userCustomPinTimestamps
+          : {};
+        let pinUpdated = false;
+        for (const [id, customPin] of Object.entries(data.userCustomPins)) {
+          if (typeof customPin === 'string' && customPin.trim().length >= 4) {
+            if (upsertStoredStaffPin(id, customPin, timestamps[id.toLowerCase()], 'server')) {
+              pinUpdated = true;
+            }
+          }
+        }
         const users = getAllUsers();
         let changed = false;
         const updatedUsers = users.map(u => {
-          const customPin = data.userCustomPins[u.identifier.toLowerCase()];
-          if (customPin && u.pin !== customPin) {
+          if (u.role === 'student') return u;
+          const effective = getEffectiveStaffPin(u.identifier, u.pin);
+          if (effective && u.pin !== effective) {
             changed = true;
-            return { ...u, pin: customPin };
+            return { ...u, pin: effective };
           }
           return u;
         });
         if (changed) {
           safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
         }
+        if (changed || pinUpdated) {
+          window.dispatchEvent(new Event('auth-change'));
+        }
       }
 
-      // 5b. Password Reset Requests Sync
+      // 5b. Password Reset Requests Sync (Safe merge: resolved approvals/rejections always win over stale pending items)
       if (Array.isArray(data.passwordResetRequests)) {
         const currentReqs = getPasswordResetRequests();
+        const mergedReqs = mergePasswordResetRequests(currentReqs, data.passwordResetRequests);
         const prevStr = JSON.stringify(currentReqs.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
-        const nextStr = JSON.stringify(data.passwordResetRequests.map((r: any) => ({ id: r.id, status: r.status, pin: r.requestedPin })));
+        const nextStr = JSON.stringify(mergedReqs.map(r => ({ id: r.id, status: r.status, pin: r.requestedPin })));
         if (prevStr !== nextStr) {
-          safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(data.passwordResetRequests));
+          safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(mergedReqs));
           window.dispatchEvent(new CustomEvent('password-requests-updated'));
         }
       }

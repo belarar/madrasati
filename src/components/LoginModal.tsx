@@ -20,7 +20,8 @@ import { SCHOOL_CLASSES, SCHOOL_NAME } from '../data/mockData';
 import { OFFICIAL_STAFF_LIST } from '../data/officialStaff';
 import {
   authenticateOfficialStudent,
-  authenticateUser,
+  authenticateUserAsync,
+  normalizeIdentifier,
   submitPasswordResetRequest,
 } from '../services/storageService';
 import { UserProfile } from '../types';
@@ -43,6 +44,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   // Staff Form Fields: الرقم المهني + كلمة السر
   const [staffId, setStaffId] = useState('');
   const [staffPin, setStaffPin] = useState('');
+  const [showStaffPin, setShowStaffPin] = useState(false);
 
   // Password Reset Mode Fields (Staff requests reset -> Director must approve)
   const [isResetMode, setIsResetMode] = useState(false);
@@ -99,8 +101,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     }, 250);
   };
 
-  // Staff Login Submit Handler - Strictly allows only registered official staff
-  const handleStaffSubmit = (e: React.FormEvent) => {
+  // Staff Login Submit Handler - Strictly allows only registered official staff (with live cloud sync check)
+  const handleStaffSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -116,8 +118,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const res = authenticateUser(cleanStaffId, staffPin.trim());
+    try {
+      const res = await authenticateUserAsync(cleanStaffId, staffPin.trim());
       setLoading(false);
 
       if (res.success && res.user) {
@@ -129,7 +131,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
             '⛔ رقم التعريف المهني غير مسجل في قائمة موظفي المؤسسة، أو كلمة السر غير صحيحة.'
         );
       }
-    }, 250);
+    } catch {
+      setLoading(false);
+      setError('حدث خطأ أثناء التحقق من بيانات الدخول. يرجى المحاولة مرة أخرى.');
+    }
   };
 
   // Staff Password Reset Submit Handler (Requests reset which requires director approval)
@@ -168,7 +173,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
   };
 
   const detectedStaff = resetStaffId.trim()
-    ? OFFICIAL_STAFF_LIST.find(s => s.identifier === resetStaffId.trim())
+    ? OFFICIAL_STAFF_LIST.find(s => normalizeIdentifier(s.identifier) === normalizeIdentifier(resetStaffId))
     : null;
 
   return (
@@ -673,17 +678,25 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                   </div>
                   <div className="relative">
                     <input
-                      type="password"
+                      type={showStaffPin ? 'text' : 'password'}
                       required
                       minLength={4}
                       placeholder="أدخل كلمة السر الخاصة بك"
                       value={staffPin}
                       onChange={e => setStaffPin(e.target.value)}
                       style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                      className="w-full pl-4 pr-10 py-3 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none font-mono tracking-widest bg-white"
+                      className="w-full pl-10 pr-10 py-3 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none font-mono tracking-widest bg-white"
                       dir="ltr"
                     />
                     <Lock className="w-5 h-5 text-emerald-700 absolute right-3 top-3.5" />
+                    <button
+                      type="button"
+                      onClick={() => setShowStaffPin(!showStaffPin)}
+                      className="absolute left-3 top-3.5 text-slate-400 hover:text-slate-600 cursor-pointer"
+                      title={showStaffPin ? 'إخفاء كلمة السر' : 'إظهار كلمة السر'}
+                    >
+                      {showStaffPin ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
+                    </button>
                   </div>
                 </div>
 

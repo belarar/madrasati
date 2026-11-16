@@ -72,12 +72,14 @@ export const StaffAccountsManager: React.FC = () => {
     setResetRequests(getPasswordResetRequests());
     fetchPasswordResetRequestsFromServer().then(data => {
       if (data) setResetRequests(data);
+      setStaffList(getOfficialStaffAccountList());
     });
   };
 
   useEffect(() => {
     fetchPasswordResetRequestsFromServer().then(data => {
       if (data) setResetRequests(data);
+      setStaffList(getOfficialStaffAccountList());
     });
 
     const handleReqUpdate = () => {
