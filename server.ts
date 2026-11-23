@@ -1144,6 +1144,74 @@ app.delete('/api/password-reset-requests/:id', (req, res) => {
   res.json({ success: true });
 });
 
+// ================= REAL-TIME LIVE PRESENCE TRACKING =================
+interface ServerPresenceEntry {
+  identifier: string;
+  name: string;
+  role: string;
+  title?: string;
+  classId?: string;
+  className?: string;
+  lastSeen: number;
+  isOnline: boolean;
+}
+
+const presenceMap = new Map<string, ServerPresenceEntry>();
+const PRESENCE_TTL_MS = 90 * 1000;
+
+app.post('/api/presence/heartbeat', (req, res) => {
+  const body = req.body || {};
+  const rawId = typeof body.identifier === 'string' ? body.identifier.trim().toLowerCase() : '';
+  const name = typeof body.name === 'string' ? body.name.trim() : '';
+  const role = typeof body.role === 'string' ? body.role.trim() : '';
+
+  if (!rawId || !name || !role) {
+    return res.status(400).json({ error: 'بيانات التواجد غير مكتملة.' });
+  }
+
+  presenceMap.set(rawId, {
+    identifier: String(body.identifier).trim(),
+    name,
+    role,
+    title: typeof body.title === 'string' ? body.title : undefined,
+    classId: typeof body.classId === 'string' ? body.classId : undefined,
+    className: typeof body.className === 'string' ? body.className : undefined,
+    lastSeen: Date.now(),
+    isOnline: true,
+  });
+
+  res.json({ success: true });
+});
+
+app.post('/api/presence/offline', (req, res) => {
+  const body = req.body || {};
+  const rawId = typeof body.identifier === 'string' ? body.identifier.trim().toLowerCase() : '';
+  if (rawId && presenceMap.has(rawId)) {
+    const existing = presenceMap.get(rawId)!;
+    presenceMap.set(rawId, {
+      ...existing,
+      lastSeen: Date.now(),
+      isOnline: false,
+    });
+  }
+  res.json({ success: true });
+});
+
+app.get('/api/presence', (req, res) => {
+  const now = Date.now();
+  const active: ServerPresenceEntry[] = [];
+  for (const [key, entry] of presenceMap.entries()) {
+    if (now - entry.lastSeen > PRESENCE_TTL_MS * 4) {
+      presenceMap.delete(key);
+      continue;
+    }
+    if (entry.isOnline && now - entry.lastSeen <= PRESENCE_TTL_MS) {
+      active.push(entry);
+    }
+  }
+  res.json({ records: active, serverTime: now });
+});
+
 // ================= SPA & VITE DEV SERVER MOUNTING =================
 
 async function startServer() {

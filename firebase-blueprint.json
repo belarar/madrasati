@@ -136,6 +136,22 @@
         "fileFormat": { "type": "string" }
       },
       "required": ["conversationId", "senderId", "senderName", "content", "createdAt"]
+    },
+    "UserPresence": {
+      "title": "UserPresence",
+      "description": "Real-time online presence status for students, teachers, and staff",
+      "type": "object",
+      "properties": {
+        "identifier": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "title": { "type": "string" },
+        "classId": { "type": "string" },
+        "className": { "type": "string" },
+        "lastSeen": { "type": "number" },
+        "isOnline": { "type": "boolean" }
+      },
+      "required": ["identifier", "name", "role", "lastSeen", "isOnline"]
     }
   },
   "firestore": {
@@ -166,6 +182,10 @@
     "/private_messages/{messageId}": {
       "schema": { "$ref": "#/entities/PrivateMessage" },
       "description": "Collection of private messages"
+    },
+    "/user_presence/{presenceId}": {
+      "schema": { "$ref": "#/entities/UserPresence" },
+      "description": "Collection of live online presence heartbeats for students and teachers"
     }
   }
 }

@@ -18,6 +18,7 @@ import {
   PrivateMessage,
   SchoolAnnouncement,
   SchoolDocument,
+  UserPresenceRecord,
 } from '../types';
 
 export enum OperationType {
@@ -62,6 +63,7 @@ const privateConvCol = collection(firestore, 'private_conversations');
 const privateMsgCol = collection(firestore, 'private_messages');
 const resetRequestsCol = collection(firestore, 'password_reset_requests');
 const staffPinsCol = collection(firestore, 'staff_pins');
+const presenceCol = collection(firestore, 'user_presence');
 
 export interface FirestorePasswordResetRequest {
   id: string;
@@ -720,4 +722,72 @@ export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], e
   } catch (err) {
     console.warn('[Firestore] Seed check warning:', err);
   }
+}
+
+// ================= Real-Time User Presence (Online Students & Teachers) =================
+export async function savePresenceHeartbeatToFirestore(record: UserPresenceRecord): Promise<void> {
+  if (!record.identifier) return;
+  const docId = record.identifier.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  try {
+    const cleanPayload: Record<string, unknown> = {
+      identifier: record.identifier,
+      name: record.name,
+      role: record.role,
+      lastSeen: record.lastSeen,
+      isOnline: record.isOnline,
+    };
+    if (record.title) cleanPayload.title = record.title;
+    if (record.classId) cleanPayload.classId = record.classId;
+    if (record.className) cleanPayload.className = record.className;
+    await setDoc(doc(firestore, 'user_presence', docId), cleanPayload, { merge: true });
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `user_presence/${docId}`);
+  }
+}
+
+export async function markPresenceOfflineInFirestore(identifier: string): Promise<void> {
+  if (!identifier) return;
+  const docId = identifier.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  try {
+    await setDoc(
+      doc(firestore, 'user_presence', docId),
+      {
+        isOnline: false,
+        lastSeen: Date.now(),
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `user_presence/${docId}`);
+  }
+}
+
+export function initPresenceRealtimeSync(
+  onPresence: (records: UserPresenceRecord[]) => void
+): () => void {
+  return onSnapshot(
+    presenceCol,
+    snapshot => {
+      const records: UserPresenceRecord[] = [];
+      snapshot.forEach(d => {
+        const data = d.data() as Partial<UserPresenceRecord>;
+        if (data && data.identifier && data.name && data.role) {
+          records.push({
+            identifier: data.identifier,
+            name: data.name,
+            role: data.role,
+            title: data.title,
+            classId: data.classId,
+            className: data.className,
+            lastSeen: typeof data.lastSeen === 'number' ? data.lastSeen : 0,
+            isOnline: Boolean(data.isOnline),
+          });
+        }
+      });
+      onPresence(records);
+    },
+    err => {
+      handleFirestoreError(err, OperationType.LIST, 'user_presence');
+    }
+  );
 }

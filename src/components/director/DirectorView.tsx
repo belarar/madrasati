@@ -19,6 +19,8 @@ import {
   Megaphone,
   Paperclip,
   Plus,
+  Radio,
+  Search,
   Send,
   Shield,
   ShieldAlert,
@@ -36,8 +38,10 @@ import {
   getAllUsers,
   getPendingResetRequestsCount,
   fetchPasswordResetRequestsFromServer,
+  isPresenceOnline,
   saveAnnouncement,
   saveDocument,
+  subscribeToLivePresence,
   syncWithServer,
 } from '../../services/storageService';
 import {
@@ -50,6 +54,7 @@ import {
   SchoolAnnouncement,
   SchoolDocument,
   SubjectId,
+  UserPresenceRecord,
   UserProfile,
 } from '../../types';
 import { AnnouncementCard } from '../common/AnnouncementCard';
@@ -76,10 +81,17 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   summons,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'staff-accounts' | 'student-codes' | 'roster' | 'chat-supervision'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'staff-accounts' | 'student-codes' | 'online-users' | 'roster' | 'chat-supervision'>('announcements');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [showDebugModal, setShowDebugModal] = useState(false);
   const [studentRefreshSignal, setStudentRefreshSignal] = useState(0);
+
+  // Live Presence State (Online Students & Teachers)
+  const [presenceRecords, setPresenceRecords] = useState<UserPresenceRecord[]>([]);
+  const [presenceNowTs, setPresenceNowTs] = useState<number>(() => Date.now());
+  const [presenceSearch, setPresenceSearch] = useState('');
+  const [presenceClassFilter, setPresenceClassFilter] = useState<string>('ALL');
+  const [presenceViewMode, setPresenceViewMode] = useState<'online' | 'all'>('online');
 
   // New Announcement Form State
   const [annTitle, setAnnTitle] = useState('');
@@ -144,6 +156,21 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     return () => {
       window.removeEventListener('password-requests-updated', handleReqUpdate);
       clearInterval(interval);
+    };
+  }, []);
+
+  React.useEffect(() => {
+    const unsubscribe = subscribeToLivePresence(records => {
+      setPresenceRecords(records);
+      setPresenceNowTs(Date.now());
+    });
+    const expiryTick = setInterval(() => {
+      setPresenceNowTs(Date.now());
+    }, 10_000);
+
+    return () => {
+      unsubscribe();
+      clearInterval(expiryTick);
     };
   }, []);
 
@@ -372,7 +399,86 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   const totalDownloads = documents.reduce((acc, d) => acc + (d.downloadCount || 0), 0);
   const totalStudentsApprox = SCHOOL_CLASSES.reduce((acc, c) => acc + c.studentCount, 0);
 
-  const registeredStudents = getAllUsers().filter(u => u.role === 'student');
+  const allDirectoryUsers = getAllUsers();
+  const registeredStudents = allDirectoryUsers.filter(u => u.role === 'student');
+  const allTeachers = allDirectoryUsers.filter(u => u.role === 'teacher');
+
+  const presenceById = React.useMemo(() => {
+    const map = new Map<string, UserPresenceRecord>();
+    for (const rec of presenceRecords) {
+      const key = rec.identifier.trim().toLowerCase();
+      if (!key) continue;
+      const existing = map.get(key);
+      if (!existing || rec.lastSeen >= existing.lastSeen) {
+        map.set(key, rec);
+      }
+    }
+    return map;
+  }, [presenceRecords]);
+
+  const userDirectoryById = React.useMemo(() => {
+    const map = new Map<string, UserProfile>();
+    for (const u of allDirectoryUsers) {
+      map.set(u.identifier.trim().toLowerCase(), u);
+    }
+    return map;
+  }, [allDirectoryUsers]);
+
+  const onlineStudentRecords = React.useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ user: UserProfile; presence: UserPresenceRecord }> = [];
+    for (const rec of presenceRecords) {
+      if (rec.role !== 'student' || !isPresenceOnline(rec, presenceNowTs)) continue;
+      const normId = rec.identifier.trim().toLowerCase();
+      if (seen.has(normId)) continue;
+      seen.add(normId);
+      const dirUser = userDirectoryById.get(normId);
+      list.push({
+        user: dirUser || {
+          id: normId,
+          identifier: rec.identifier,
+          name: rec.name,
+          role: 'student',
+          classId: rec.classId,
+          className: rec.className,
+        },
+        presence: rec,
+      });
+    }
+    return list.sort((a, b) => b.presence.lastSeen - a.presence.lastSeen);
+  }, [presenceRecords, presenceNowTs, userDirectoryById]);
+
+  const onlineTeacherRecords = React.useMemo(() => {
+    const seen = new Set<string>();
+    const list: Array<{ user: UserProfile; presence: UserPresenceRecord }> = [];
+    for (const rec of presenceRecords) {
+      if (rec.role !== 'teacher' || !isPresenceOnline(rec, presenceNowTs)) continue;
+      const normId = rec.identifier.trim().toLowerCase();
+      if (seen.has(normId)) continue;
+      seen.add(normId);
+      const dirUser = userDirectoryById.get(normId);
+      list.push({
+        user: dirUser || {
+          id: normId,
+          identifier: rec.identifier,
+          name: rec.name,
+          role: 'teacher',
+          title: rec.title,
+        },
+        presence: rec,
+      });
+    }
+    return list.sort((a, b) => b.presence.lastSeen - a.presence.lastSeen);
+  }, [presenceRecords, presenceNowTs, userDirectoryById]);
+
+  const formatPresenceAgo = (lastSeen?: number) => {
+    if (!lastSeen) return 'غير متصل';
+    const diff = Math.max(0, presenceNowTs - lastSeen);
+    if (diff < 15_000) return 'نشط الآن';
+    if (diff < 60_000) return `منذ ${Math.floor(diff / 1000)} ثا`;
+    return `منذ ${Math.floor(diff / 60_000)} د`;
+  };
+
   const filteredStudents = registeredStudents.filter(s => {
     if (!studentSearch.trim()) return true;
     const q = studentSearch.toLowerCase();
@@ -387,7 +493,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     <div className="space-y-6">
       {/* Director Executive Banner */}
       <div className="print:hidden rounded-3xl bg-gradient-to-r from-slate-900 via-emerald-950 to-teal-950 text-white p-6 sm:p-8 shadow-md relative overflow-hidden">
-        <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
+        <div className="relative z-10 flex flex-col lg:flex-row lg:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs text-xs font-semibold text-emerald-200 border border-white/15">
               <Building className="w-4 h-4 text-emerald-300" />
@@ -405,8 +511,44 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             </p>
           </div>
 
-          {/* Key School Metrics */}
-          <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
+          {/* Key School Metrics + Live Connected Indicators */}
+          <div className="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-6 gap-2.5">
+            <button
+              type="button"
+              onClick={() => setActiveTab('online-users')}
+              className="bg-emerald-500/20 hover:bg-emerald-500/30 backdrop-blur-md rounded-2xl p-3 border border-emerald-400/40 text-center transition-all cursor-pointer group"
+              title="عرض التلاميذ المتصلين الآن"
+            >
+              <span className="text-[11px] text-emerald-100 flex items-center justify-center gap-1.5 mb-0.5 font-bold">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+                </span>
+                <span>تلاميذ متصلون</span>
+              </span>
+              <span className="text-xl sm:text-2xl font-black text-emerald-300 group-hover:text-white transition-colors">
+                {onlineStudentRecords.length}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setActiveTab('online-users')}
+              className="bg-emerald-500/20 hover:bg-emerald-500/30 backdrop-blur-md rounded-2xl p-3 border border-emerald-400/40 text-center transition-all cursor-pointer group"
+              title="عرض الأساتذة المتصلين الآن"
+            >
+              <span className="text-[11px] text-emerald-100 flex items-center justify-center gap-1.5 mb-0.5 font-bold">
+                <span className="relative flex h-2.5 w-2.5 shrink-0">
+                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                  <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_8px_#34d399]" />
+                </span>
+                <span>أساتذة متصلون</span>
+              </span>
+              <span className="text-xl sm:text-2xl font-black text-emerald-300 group-hover:text-white transition-colors">
+                {onlineTeacherRecords.length}
+              </span>
+            </button>
+
             <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3 border border-white/15 text-center">
               <span className="text-[11px] text-emerald-200 block mb-0.5 font-medium">مجموع الوثائق</span>
               <span className="text-xl sm:text-2xl font-black text-white">{documents.length}</span>
@@ -548,6 +690,30 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             <span>رموز تفعيل التلاميذ (6 أرقام)</span>
             <span className="text-[10px] bg-emerald-700 text-white font-black px-2 py-0.5 rounded-full">
               {registeredStudents.length}
+            </span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('online-users')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer ${
+              activeTab === 'online-users'
+                ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400/40'
+                : 'bg-emerald-50 text-emerald-950 border border-emerald-300 hover:bg-emerald-100'
+            }`}
+          >
+            <span className="relative flex h-2.5 w-2.5 shrink-0">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+            </span>
+            <span>المتصلون الآن</span>
+            <span
+              className={`text-[10px] font-black px-2 py-0.5 rounded-full ${
+                activeTab === 'online-users'
+                  ? 'bg-white text-emerald-900'
+                  : 'bg-emerald-700 text-white'
+              }`}
+            >
+              {onlineStudentRecords.length + onlineTeacherRecords.length}
             </span>
           </button>
 
@@ -1202,6 +1368,22 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 <p className="text-xs text-slate-500 mt-0.5">
                   تضم هيئة التدريس، إدارة المؤسسة، المصالح الاقتصادية، مستشارية التوجيه، سلك الإشراف والعمال المهنيين.
                 </p>
+                <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-[11px] font-bold">
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
+                    <span>الأساتذة المتصلون الآن: {onlineTeacherRecords.length}</span>
+                  </span>
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900">
+                    <span className="relative flex h-2 w-2">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
+                    </span>
+                    <span>التلاميذ المتصلون الآن: {onlineStudentRecords.length}</span>
+                  </span>
+                </div>
               </div>
 
               {/* Category Filter Chips */}
@@ -1288,6 +1470,8 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 })
                 .map(staff => {
                   const staffDocs = documents.filter(d => d.authorId === staff.id);
+                  const staffPresence = presenceById.get(staff.identifier.trim().toLowerCase());
+                  const staffOnline = isPresenceOnline(staffPresence, presenceNowTs);
                   const isSupervisor = staff.title?.includes('مشرف');
                   const isAdmin =
                     staff.role === 'director' ||
@@ -1298,16 +1482,37 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                   return (
                     <div
                       key={staff.id}
-                      className="p-4 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-300 transition-all space-y-2"
+                      className={`p-4 rounded-2xl border transition-all space-y-2 ${
+                        staffOnline
+                          ? 'border-emerald-300 bg-emerald-50/40 hover:bg-white shadow-2xs'
+                          : 'border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-300'
+                      }`}
                     >
                       <div className="flex items-center justify-between gap-2">
-                        <span className="font-bold text-slate-900 text-sm truncate">{staff.name}</span>
-                        <span
-                          className="text-[11px] font-mono bg-slate-200 px-2 py-0.5 rounded text-slate-700 font-bold tracking-wider shrink-0"
-                          dir="ltr"
-                        >
-                          {staff.identifier}
-                        </span>
+                        <div className="flex items-center gap-2 min-w-0">
+                          {staffOnline ? (
+                            <span className="relative flex h-2.5 w-2.5 shrink-0" title="متصل الآن">
+                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                              <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_6px_#10b981]" />
+                            </span>
+                          ) : (
+                            <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" title="غير متصل" />
+                          )}
+                          <span className="font-bold text-slate-900 text-sm truncate">{staff.name}</span>
+                        </div>
+                        <div className="flex items-center gap-1.5 shrink-0">
+                          {staffOnline && (
+                            <span className="text-[10px] font-black px-2 py-0.5 rounded-full bg-emerald-600 text-white">
+                              متصل
+                            </span>
+                          )}
+                          <span
+                            className="text-[11px] font-mono bg-slate-200 px-2 py-0.5 rounded text-slate-700 font-bold tracking-wider"
+                            dir="ltr"
+                          >
+                            {staff.identifier}
+                          </span>
+                        </div>
                       </div>
 
                       <div className="flex items-center gap-1.5 flex-wrap">
@@ -1397,26 +1602,51 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-              {filteredStudents.map(student => (
-                <div
-                  key={student.id}
-                  className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-400 transition-all flex items-center justify-between gap-2 text-xs"
-                >
-                  <div className="min-w-0">
-                    <span className="font-bold text-slate-900 block truncate">{student.name}</span>
-                    <span className="text-[11px] text-emerald-800 font-semibold block">{student.className}</span>
+              {filteredStudents.map(student => {
+                const studentPresence = presenceById.get(student.identifier.trim().toLowerCase());
+                const studentOnline = isPresenceOnline(studentPresence, presenceNowTs);
+                return (
+                  <div
+                    key={student.id}
+                    className={`p-3.5 rounded-2xl border transition-all flex items-center justify-between gap-2 text-xs ${
+                      studentOnline
+                        ? 'border-emerald-300 bg-emerald-50/50 hover:bg-white shadow-2xs'
+                        : 'border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-400'
+                    }`}
+                  >
+                    <div className="min-w-0 flex items-center gap-2">
+                      {studentOnline ? (
+                        <span className="relative flex h-2.5 w-2.5 shrink-0" title="متصل الآن">
+                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_6px_#10b981]" />
+                        </span>
+                      ) : (
+                        <span className="w-2.5 h-2.5 rounded-full bg-slate-300 shrink-0" title="غير متصل" />
+                      )}
+                      <div className="min-w-0">
+                        <div className="flex items-center gap-1.5">
+                          <span className="font-bold text-slate-900 block truncate">{student.name}</span>
+                          {studentOnline && (
+                            <span className="text-[10px] font-black px-1.5 py-0.5 rounded-full bg-emerald-600 text-white shrink-0">
+                              متصل
+                            </span>
+                          )}
+                        </div>
+                        <span className="text-[11px] text-emerald-800 font-semibold block">{student.className}</span>
+                      </div>
+                    </div>
+                    <div className="text-center shrink-0">
+                      <span className="text-[9px] text-emerald-700 font-bold block mb-0.5">رمز التفعيل</span>
+                      <span
+                        className="font-mono bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg text-emerald-950 font-black tracking-wider block"
+                        dir="ltr"
+                      >
+                        {student.activationCode || '------'}
+                      </span>
+                    </div>
                   </div>
-                  <div className="text-center shrink-0">
-                    <span className="text-[9px] text-emerald-700 font-bold block mb-0.5">رمز التفعيل</span>
-                    <span
-                      className="font-mono bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg text-emerald-950 font-black tracking-wider block"
-                      dir="ltr"
-                    >
-                      {student.activationCode || '------'}
-                    </span>
-                  </div>
-                </div>
-              ))}
+                );
+              })}
             </div>
           </div>
 
@@ -1519,6 +1749,356 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
           </div>
         </div>
       )}
+
+      {/* Tab: Live Online Students & Teachers */}
+      {activeTab === 'online-users' && (() => {
+        const q = presenceSearch.trim().toLowerCase();
+
+        const studentEntries = (
+          presenceViewMode === 'online'
+            ? onlineStudentRecords
+            : registeredStudents.map(u => ({
+                user: u,
+                presence: presenceById.get(u.identifier.trim().toLowerCase()) || null,
+              }))
+        )
+          .filter(item => {
+            if (presenceClassFilter !== 'ALL' && item.user.classId !== presenceClassFilter) return false;
+            if (!q) return true;
+            return (
+              item.user.name.toLowerCase().includes(q) ||
+              (item.user.className || '').toLowerCase().includes(q)
+            );
+          })
+          .sort((a, b) => {
+            const aOn = isPresenceOnline(a.presence, presenceNowTs) ? 1 : 0;
+            const bOn = isPresenceOnline(b.presence, presenceNowTs) ? 1 : 0;
+            if (aOn !== bOn) return bOn - aOn;
+            return (b.presence?.lastSeen || 0) - (a.presence?.lastSeen || 0);
+          });
+
+        const teacherEntries = (
+          presenceViewMode === 'online'
+            ? onlineTeacherRecords
+            : allTeachers.map(u => ({
+                user: u,
+                presence: presenceById.get(u.identifier.trim().toLowerCase()) || null,
+              }))
+        )
+          .filter(item => {
+            if (!q) return true;
+            return (
+              item.user.name.toLowerCase().includes(q) ||
+              (item.user.title || '').toLowerCase().includes(q) ||
+              (item.user.assignedClasses || []).some(c => c.toLowerCase().includes(q))
+            );
+          })
+          .sort((a, b) => {
+            const aOn = isPresenceOnline(a.presence, presenceNowTs) ? 1 : 0;
+            const bOn = isPresenceOnline(b.presence, presenceNowTs) ? 1 : 0;
+            if (aOn !== bOn) return bOn - aOn;
+            return (b.presence?.lastSeen || 0) - (a.presence?.lastSeen || 0);
+          });
+
+        return (
+          <div className="space-y-6">
+            {/* Live Summary Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div className="rounded-3xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-teal-50/40 p-5 shadow-xs flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-sm relative">
+                    <GraduationCap className="w-6 h-6" />
+                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white" />
+                    </span>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-slate-900 text-base">التلاميذ المتصلون الآن</h3>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-black">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>متصل</span>
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      من أصل {registeredStudents.length} تلميذ وتلميذة مسجلين في المنصة
+                    </p>
+                  </div>
+                </div>
+                <div className="text-left shrink-0">
+                  <span className="text-3xl sm:text-4xl font-black text-emerald-700 tabular-nums">
+                    {onlineStudentRecords.length}
+                  </span>
+                  <span className="block text-[10px] font-bold text-slate-500">تلميذ متصل</span>
+                </div>
+              </div>
+
+              <div className="rounded-3xl border-2 border-emerald-200 bg-gradient-to-br from-emerald-50 via-white to-teal-50/40 p-5 shadow-xs flex items-center justify-between gap-4">
+                <div className="flex items-center gap-3.5">
+                  <div className="w-12 h-12 rounded-2xl bg-teal-700 text-white flex items-center justify-center shadow-sm relative">
+                    <BookOpen className="w-6 h-6" />
+                    <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white" />
+                    </span>
+                  </div>
+                  <div>
+                    <div className="flex items-center gap-2">
+                      <h3 className="font-black text-slate-900 text-base">الأساتذة المتصلون الآن</h3>
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-black">
+                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span>متصل</span>
+                      </span>
+                    </div>
+                    <p className="text-xs text-slate-500 mt-0.5">
+                      من أصل {allTeachers.length} أستاذ وأستاذة في هيئة التدريس
+                    </p>
+                  </div>
+                </div>
+                <div className="text-left shrink-0">
+                  <span className="text-3xl sm:text-4xl font-black text-teal-700 tabular-nums">
+                    {onlineTeacherRecords.length}
+                  </span>
+                  <span className="block text-[10px] font-bold text-slate-500">أستاذ متصل</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Filter & View Controls */}
+            <div className="bg-white rounded-2xl border border-slate-200 p-4 shadow-xs flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+              <div className="flex flex-wrap items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setPresenceViewMode('online')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    presenceViewMode === 'online'
+                      ? 'bg-emerald-700 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <span className="w-2 h-2 rounded-full bg-emerald-400" />
+                  <span>المتصلون الآن فقط ({onlineStudentRecords.length + onlineTeacherRecords.length})</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setPresenceViewMode('all')}
+                  className={`flex items-center gap-2 px-3.5 py-2 rounded-xl text-xs font-bold transition-all cursor-pointer ${
+                    presenceViewMode === 'all'
+                      ? 'bg-slate-800 text-white shadow-xs'
+                      : 'bg-slate-100 text-slate-700 hover:bg-slate-200'
+                  }`}
+                >
+                  <Radio className="w-3.5 h-3.5" />
+                  <span>عرض الكل (بمؤشر أخضر للمتصل / رمادي لغير المتصل)</span>
+                </button>
+              </div>
+
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={presenceSearch}
+                    onChange={e => setPresenceSearch(e.target.value)}
+                    placeholder="بحث بالاسم أو القسم أو المادة..."
+                    className="pr-9 pl-3 py-2 rounded-xl border border-slate-300 text-xs outline-none focus:border-emerald-600 w-56 sm:w-64"
+                  />
+                </div>
+
+                <select
+                  value={presenceClassFilter}
+                  onChange={e => setPresenceClassFilter(e.target.value)}
+                  className="px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold bg-white outline-none focus:border-emerald-600"
+                >
+                  <option value="ALL">جميع الأقسام ({SCHOOL_CLASSES.length})</option>
+                  {SCHOOL_CLASSES.map(c => (
+                    <option key={c.id} value={c.id}>
+                      {c.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            </div>
+
+            {/* Dual Live Panels: Online Students & Online Teachers */}
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              {/* Online Students List */}
+              <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                    </span>
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      قائمة التلاميذ المتصلين
+                    </h4>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-emerald-100 text-emerald-900 text-xs font-black">
+                    {onlineStudentRecords.length} متصل
+                  </span>
+                </div>
+
+                {studentEntries.length === 0 ? (
+                  <div className="text-center py-10 px-4 rounded-2xl bg-slate-50 border border-dashed border-slate-200">
+                    <GraduationCap className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-600">
+                      {presenceViewMode === 'online'
+                        ? 'لا يوجد تلاميذ متصلون بالمنصة في هذه اللحظة'
+                        : 'لا توجد نتائج مطابقة للبحث'}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      بمجرد دخول أي تلميذ برمز التفعيل سيظهر اسمه وقسمه هنا مع ضوء أخضر فوري.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[540px] overflow-y-auto pl-1">
+                    {studentEntries.map(({ user: stu, presence }) => {
+                      const online = isPresenceOnline(presence, presenceNowTs);
+                      return (
+                        <div
+                          key={stu.identifier}
+                          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+                            online
+                              ? 'border-emerald-200 bg-emerald-50/60'
+                              : 'border-slate-200 bg-slate-50/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            {online ? (
+                              <span className="relative flex h-3 w-3 shrink-0" title="متصل الآن">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                              </span>
+                            ) : (
+                              <span className="w-3 h-3 rounded-full bg-slate-300 shrink-0" title="غير متصل" />
+                            )}
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-900 text-sm block truncate">
+                                {stu.name}
+                              </span>
+                              <span className="text-xs font-semibold text-emerald-800 block">
+                                {stu.className || 'تلميذ بالمؤسسة'}
+                              </span>
+                            </div>
+                          </div>
+
+                          <div className="text-left shrink-0">
+                            {online ? (
+                              <>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[11px] font-black">
+                                  متصل الآن
+                                </span>
+                                <span className="block text-[10px] text-emerald-700 font-semibold mt-0.5">
+                                  {formatPresenceAgo(presence?.lastSeen)}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[11px] font-bold">
+                                غير متصل
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+
+              {/* Online Teachers List */}
+              <div className="bg-white rounded-3xl border border-slate-200 p-5 shadow-xs space-y-4">
+                <div className="flex items-center justify-between border-b border-slate-100 pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="relative flex h-3 w-3 shrink-0">
+                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                      <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                    </span>
+                    <h4 className="font-black text-slate-900 text-sm sm:text-base">
+                      قائمة الأساتذة المتصلين
+                    </h4>
+                  </div>
+                  <span className="px-2.5 py-1 rounded-full bg-teal-100 text-teal-900 text-xs font-black">
+                    {onlineTeacherRecords.length} متصل
+                  </span>
+                </div>
+
+                {teacherEntries.length === 0 ? (
+                  <div className="text-center py-10 px-4 rounded-2xl bg-slate-50 border border-dashed border-slate-200">
+                    <BookOpen className="w-8 h-8 text-slate-300 mx-auto mb-2" />
+                    <p className="text-sm font-bold text-slate-600">
+                      {presenceViewMode === 'online'
+                        ? 'لا يوجد أساتذة متصلون بالمنصة في هذه اللحظة'
+                        : 'لا توجد نتائج مطابقة للبحث'}
+                    </p>
+                    <p className="text-xs text-slate-400 mt-1">
+                      عند تسجيل دخول أي أستاذ إلى فضائه سيظهر اسمه ومادته هنا مع ضوء أخضر فوري.
+                    </p>
+                  </div>
+                ) : (
+                  <div className="space-y-2.5 max-h-[540px] overflow-y-auto pl-1">
+                    {teacherEntries.map(({ user: teacher, presence }) => {
+                      const online = isPresenceOnline(presence, presenceNowTs);
+                      return (
+                        <div
+                          key={teacher.identifier}
+                          className={`p-3.5 rounded-2xl border flex items-center justify-between gap-3 transition-all ${
+                            online
+                              ? 'border-emerald-200 bg-emerald-50/60'
+                              : 'border-slate-200 bg-slate-50/40'
+                          }`}
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            {online ? (
+                              <span className="relative flex h-3 w-3 shrink-0" title="متصل الآن">
+                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+                                <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
+                              </span>
+                            ) : (
+                              <span className="w-3 h-3 rounded-full bg-slate-300 shrink-0" title="غير متصل" />
+                            )}
+                            <div className="min-w-0">
+                              <span className="font-bold text-slate-900 text-sm block truncate">
+                                {teacher.name}
+                              </span>
+                              <span className="text-xs font-semibold text-teal-800 block truncate">
+                                {teacher.title || 'أستاذ(ة) التعليم المتوسط'}
+                              </span>
+                              {teacher.assignedClasses && teacher.assignedClasses.length > 0 && (
+                                <span className="text-[11px] text-slate-500 block truncate mt-0.5">
+                                  الأقسام: {teacher.assignedClasses.join('، ')}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+
+                          <div className="text-left shrink-0">
+                            {online ? (
+                              <>
+                                <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-emerald-600 text-white text-[11px] font-black">
+                                  متصل الآن
+                                </span>
+                                <span className="block text-[10px] text-emerald-700 font-semibold mt-0.5">
+                                  {formatPresenceAgo(presence?.lastSeen)}
+                                </span>
+                              </>
+                            ) : (
+                              <span className="inline-flex items-center px-2.5 py-0.5 rounded-full bg-slate-200 text-slate-600 text-[11px] font-bold">
+                                غير متصل
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
 
       {/* Tab: Student Activation Codes Directory */}
       {activeTab === 'student-codes' && (

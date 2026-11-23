@@ -241,4 +241,14 @@ export interface PrivateConversation {
   isGroup?: boolean;
 }
 
-
+// ================= الحضور المباشر والتواجد المتصل (Live Presence) =================
+export interface UserPresenceRecord {
+  identifier: string;
+  name: string;
+  role: UserRole;
+  title?: string;
+  classId?: string;
+  className?: string;
+  lastSeen: number; // epoch ms
+  isOnline: boolean;
+}

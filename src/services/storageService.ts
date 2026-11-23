@@ -21,6 +21,7 @@ import {
   UserProfile,
   UserRole,
   InternalStaffSummon,
+  UserPresenceRecord,
 } from '../types';
 import {
   OFFICIAL_STUDENTS_LIST,
@@ -44,15 +45,18 @@ import {
   fetchStaffPinFromFirestore,
   incrementDownloadCountInFirestore,
   initFirestoreRealtimeSync,
+  initPresenceRealtimeSync,
   initPrivateConversationsSync,
   initPrivateMessagesSync,
   fetchPasswordResetRequestsFromFirestore,
+  markPresenceOfflineInFirestore,
   rejectPasswordResetRequestInFirestore,
   resolvePendingResetRequestsForIdentifierInFirestore,
   saveAnnouncementToFirestore,
   saveDocumentToFirestore,
   savePasswordResetRequestToFirestore,
   savePeerPostToFirestore,
+  savePresenceHeartbeatToFirestore,
   savePrivateConversationToFirestore,
   savePrivateMessageToFirestore,
   saveStaffPinToFirestore,
@@ -3212,4 +3216,143 @@ export async function deleteSupervisedMessage(conversationId: string, messageId:
   }).catch(() => {});
 }
 
+// ================= تتبع المتصلين الآن في المنصة (التلاميذ والأساتذة) =================
+
+export const PRESENCE_ONLINE_WINDOW_MS = 65_000;
+
+const presenceLocalCache = new Map<string, UserPresenceRecord>();
+
+function normalizePresenceId(identifier?: string): string {
+  return (identifier || '').trim().toLowerCase();
+}
+
+export function isPresenceOnline(record?: UserPresenceRecord | null, now = Date.now()): boolean {
+  if (!record || !record.isOnline) return false;
+  if (!record.lastSeen || typeof record.lastSeen !== 'number') return false;
+  return now - record.lastSeen <= PRESENCE_ONLINE_WINDOW_MS;
+}
+
+export async function sendPresenceHeartbeat(user: UserProfile | null): Promise<void> {
+  if (!user || !user.identifier) return;
+
+  const record: UserPresenceRecord = {
+    identifier: user.identifier,
+    name: user.name,
+    role: user.role,
+    title: user.title,
+    classId: user.classId,
+    className: user.className,
+    lastSeen: Date.now(),
+    isOnline: true,
+  };
+
+  presenceLocalCache.set(normalizePresenceId(user.identifier), record);
+  window.dispatchEvent(new Event('presence-updated'));
+
+  savePresenceHeartbeatToFirestore(record).catch(() => {});
+
+  fetch('/api/presence/heartbeat', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(record),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+export function markUserOffline(identifier?: string, useBeacon = false): void {
+  const normId = normalizePresenceId(identifier);
+  if (!normId || !identifier) return;
+
+  const existing = presenceLocalCache.get(normId);
+  if (existing) {
+    presenceLocalCache.set(normId, {
+      ...existing,
+      isOnline: false,
+      lastSeen: Date.now(),
+    });
+    window.dispatchEvent(new Event('presence-updated'));
+  }
+
+  markPresenceOfflineInFirestore(identifier).catch(() => {});
+
+  if (useBeacon && typeof navigator !== 'undefined' && typeof navigator.sendBeacon === 'function') {
+    try {
+      const payload = new Blob([JSON.stringify({ identifier })], { type: 'application/json' });
+      navigator.sendBeacon('/api/presence/offline', payload);
+      return;
+    } catch {
+      // Fallback to fetch keepalive below
+    }
+  }
+
+  fetch('/api/presence/offline', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ identifier }),
+    keepalive: true,
+  }).catch(() => {});
+}
+
+export function subscribeToLivePresence(
+  onUpdate: (records: UserPresenceRecord[]) => void
+): () => void {
+  let firestoreRecords: UserPresenceRecord[] = [];
+  let serverRecords: UserPresenceRecord[] = [];
+
+  const emitMerged = () => {
+    const merged = new Map<string, UserPresenceRecord>();
+    const absorb = (list: UserPresenceRecord[]) => {
+      for (const rec of list) {
+        const key = normalizePresenceId(rec.identifier);
+        if (!key) continue;
+        const prev = merged.get(key);
+        if (!prev || rec.lastSeen >= prev.lastSeen) {
+          merged.set(key, rec);
+        }
+      }
+    };
+
+    absorb(Array.from(presenceLocalCache.values()));
+    absorb(serverRecords);
+    absorb(firestoreRecords);
+
+    onUpdate(Array.from(merged.values()));
+  };
+
+  const fetchServerPresence = async () => {
+    try {
+      const res = await fetch('/api/presence');
+      if (!res.ok) return;
+      const data = await res.json();
+      if (Array.isArray(data?.records)) {
+        serverRecords = data.records;
+        emitMerged();
+      }
+    } catch {
+      // Offline / fallback handled by Firestore
+    }
+  };
+
+  let unsubFirestore: (() => void) | null = null;
+  try {
+    unsubFirestore = initPresenceRealtimeSync(records => {
+      firestoreRecords = records;
+      emitMerged();
+    });
+  } catch {
+    unsubFirestore = null;
+  }
+
+  const handleLocalPresence = () => emitMerged();
+  window.addEventListener('presence-updated', handleLocalPresence);
+
+  fetchServerPresence();
+  const pollInterval = setInterval(fetchServerPresence, 12_000);
+
+  return () => {
+    if (unsubFirestore) unsubFirestore();
+    window.removeEventListener('presence-updated', handleLocalPresence);
+    clearInterval(pollInterval);
+  };
+}
 

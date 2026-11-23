@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -50,6 +50,8 @@ import {
   getUnreadNotificationsCount,
   initStorage,
   markAnnouncementAsSeen,
+  markUserOffline,
+  sendPresenceHeartbeat,
   setCurrentUser,
   syncWithServer,
 } from './services/storageService';
@@ -132,6 +134,49 @@ export default function App() {
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
     };
   }, []);
+
+  const prevPresenceIdRef = useRef<string | null>(null);
+
+  useEffect(() => {
+    const prevId = prevPresenceIdRef.current;
+    const nextId = currentUser?.identifier || null;
+
+    if (prevId && prevId !== nextId) {
+      markUserOffline(prevId);
+    }
+    prevPresenceIdRef.current = nextId;
+
+    if (!currentUser) return;
+
+    sendPresenceHeartbeat(currentUser);
+
+    const heartbeatInterval = setInterval(() => {
+      if (typeof document === 'undefined' || !document.hidden) {
+        sendPresenceHeartbeat(currentUser);
+      }
+    }, 20_000);
+
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        sendPresenceHeartbeat(currentUser);
+      }
+    };
+
+    const handlePageUnload = () => {
+      markUserOffline(currentUser.identifier, true);
+    };
+
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    window.addEventListener('beforeunload', handlePageUnload);
+    window.addEventListener('pagehide', handlePageUnload);
+
+    return () => {
+      clearInterval(heartbeatInterval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      window.removeEventListener('beforeunload', handlePageUnload);
+      window.removeEventListener('pagehide', handlePageUnload);
+    };
+  }, [currentUser]);
 
   const handleCopyCleanLink = () => {
     const cleanUrl = window.location.origin;
