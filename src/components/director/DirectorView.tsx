@@ -110,7 +110,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   // Student Roster States
   const [studentSearch, setStudentSearch] = useState('');
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
-  const [newStudentId, setNewStudentId] = useState('');
   const [newStudentName, setNewStudentName] = useState('');
   const [newStudentClass, setNewStudentClass] = useState('4AM-1');
   const [studentAddedSuccess, setStudentAddedSuccess] = useState<string | null>(null);
@@ -346,11 +345,12 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
   const handleAddStudent = (e: React.FormEvent) => {
     e.preventDefault();
-    if (!newStudentId.trim() || !newStudentName.trim()) return;
+    if (!newStudentName.trim()) return;
 
+    const generatedInternalId = `STD-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
     const selectedCls = SCHOOL_CLASSES.find(c => c.id === newStudentClass);
     const createdStudent = addCustomStudent({
-      identifier: newStudentId.trim(),
+      identifier: generatedInternalId,
       name: newStudentName.trim(),
       classId: newStudentClass,
       className: selectedCls?.name || 'رابعة متوسط 01',
@@ -359,7 +359,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     setStudentAddedSuccess(
       `تمت إضافة التلميذ(ة) "${newStudentName}" بنجاح! رمز التفعيل (6 أرقام): ${createdStudent.activationCode}`
     );
-    setNewStudentId('');
     setNewStudentName('');
     setStudentRefreshSignal(s => s + 1);
     onRefreshData();
@@ -379,7 +378,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     const q = studentSearch.toLowerCase();
     return (
       s.name.toLowerCase().includes(q) ||
-      s.identifier.toLowerCase().includes(q) ||
       (s.activationCode && s.activationCode.includes(q)) ||
       (s.className && s.className.toLowerCase().includes(q))
     );
@@ -1407,9 +1405,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                   <div className="min-w-0">
                     <span className="font-bold text-slate-900 block truncate">{student.name}</span>
                     <span className="text-[11px] text-emerald-800 font-semibold block">{student.className}</span>
-                    <span className="text-[10px] font-mono text-slate-400 block" dir="ltr">
-                      {student.identifier}
-                    </span>
                   </div>
                   <div className="text-center shrink-0">
                     <span className="text-[9px] text-emerald-700 font-bold block mb-0.5">رمز التفعيل</span>
@@ -1474,21 +1469,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             )}
 
             <form onSubmit={handleAddStudent} className="p-6 space-y-4 text-right">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  رقم التعريف المدرسي (من الملف): <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="أدخل رقم التعريف المدرسي (16 رقماً)"
-                  value={newStudentId}
-                  onChange={e => setNewStudentId(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 outline-none text-sm font-mono"
-                  dir="ltr"
-                />
-              </div>
-
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-1">
                   اسم ولقب التلميذ(ة): <span className="text-red-500">*</span>

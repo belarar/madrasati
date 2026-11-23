@@ -390,8 +390,10 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
                       <span>{roleInfo.label}</span>
                     </span>
                   </div>
-                  <span className="text-[10px] text-slate-500 text-right font-mono" dir="ltr">
-                    {currentUser.identifier}
+                  <span className="text-[10px] text-slate-500 text-right font-mono" dir={currentUser.role === 'student' ? 'rtl' : 'ltr'}>
+                    {currentUser.role === 'student'
+                      ? currentUser.className || 'تلميذ(ة) بالمؤسسة'
+                      : currentUser.identifier}
                   </span>
                 </div>
 

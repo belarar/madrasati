@@ -285,13 +285,9 @@ export const PortailCandidatModal: React.FC<PortailCandidatModalProps> = ({
                         <span className="text-slate-500">تاريخ الميلاد:</span>
                         <span className="text-slate-800 font-bold">{currentCandidate.birthDate}</span>
                       </div>
-                      <div className="flex justify-between border-b border-slate-200 pb-1.5">
+                      <div className="flex justify-between">
                         <span className="text-slate-500">الجنس:</span>
                         <span className="text-slate-800 font-bold">{currentCandidate.gender}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-slate-500">رقم التعريف المدرسي الوطني:</span>
-                        <span className="font-mono text-emerald-800 font-black">{currentCandidate.identifier}</span>
                       </div>
                     </div>
 
@@ -456,7 +452,7 @@ export const PortailCandidatModal: React.FC<PortailCandidatModalProps> = ({
                     • <strong>سحب الاستدعاء:</strong> يفتح الديوان الموقع عادة ابتداءً من شهر ماي لسحب استدعاءات المترشحين المتمدرسين والأحرار.
                   </p>
                   <p>
-                    • <strong>البيانات المطلوبة:</strong> اسم المستخدم وكلمة السر المطبوعة في وصل الترشح، أو رقم التعريف المدرسي.
+                    • <strong>البيانات المطلوبة:</strong> اسم المستخدم وكلمة السر المطبوعة في وصل الترشح.
                   </p>
                   <p>
                     • <strong>إعلان النتائج:</strong> يتم الاطلاع على النتائج وسحب كشف النقاط عبر نفس البوابة فور الإعلان الرسمي.

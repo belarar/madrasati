@@ -3,8 +3,6 @@ import {
   Check,
   Copy,
   Download,
-  Eye,
-  EyeOff,
   FileSpreadsheet,
   FileText,
   Globe,
@@ -42,7 +40,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
   const [selectedClassId, setSelectedClassId] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState('');
   const [viewMode, setViewMode] = useState<'table' | 'slips'>('table');
-  const [showSchoolIds, setShowSchoolIds] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [bulkCopied, setBulkCopied] = useState(false);
   const [slipsDownloaded, setSlipsDownloaded] = useState<'html' | 'doc' | null>(null);
@@ -91,7 +88,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
       return (
         normName.includes(normQuery) ||
         s.activationCode.includes(numQuery) ||
-        s.identifier.includes(numQuery) ||
         normalizeArabic(s.className).includes(normQuery)
       );
     });
@@ -153,7 +149,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
       'القسم الدراسي',
       'اللقب والاسم',
       'رمز التفعيل (6 أرقام)',
-      'رقم التعريف المدرسي (16 رقماً)',
       'الجنس',
       'تاريخ الميلاد',
     ];
@@ -164,7 +159,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
         escapeCsv(s.className),
         escapeCsv(s.name),
         escapeCsv(s.activationCode),
-        escapeCsv(s.identifier),
         escapeCsv(s.gender || '-'),
         escapeCsv(s.birthDate || '-'),
       ].join(',')
@@ -237,7 +231,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
         }
         <div class="slip-footer">
           <span>سري وشخصي للتلميذ(ة)</span>
-          ${showSchoolIds ? `<span dir="ltr" class="mono">${escapeHtml(s.identifier)}</span>` : ''}
         </div>
       </div>`
       )
@@ -425,7 +418,7 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
                   : ''
               }
               <div style="font-size:8pt; color:#64748b;">
-                سري وشخصي للتلميذ(ة)${showSchoolIds ? ` | <span dir="ltr">${escapeHtml(s.identifier)}</span>` : ''}
+                سري وشخصي للتلميذ(ة)
               </div>
             </div>
           </td>`;
@@ -642,21 +635,12 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
               type="text"
               value={searchQuery}
               onChange={e => setSearchQuery(e.target.value)}
-              placeholder="ابحث باسم التلميذ، رمز التفعيل (6 أرقام)، أو الرقم المدرسي..."
+              placeholder="ابحث باسم التلميذ، القسم، أو رمز التفعيل (6 أرقام)..."
               className="w-full pr-10 pl-4 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-xs sm:text-sm font-medium outline-none bg-white"
             />
           </div>
 
           <div className="flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setShowSchoolIds(v => !v)}
-              className="px-3 py-2 rounded-xl border border-slate-200 bg-slate-50 hover:bg-slate-100 text-slate-700 text-xs font-bold flex items-center gap-1.5 cursor-pointer"
-            >
-              {showSchoolIds ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
-              <span>{showSchoolIds ? 'إخفاء الرقم المدرسي (16 رقماً)' : 'إظهار الرقم المدرسي (16 رقماً)'}</span>
-            </button>
-
             <div className="inline-flex rounded-xl bg-slate-100 p-1 border border-slate-200">
               <button
                 type="button"
@@ -737,11 +721,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
                   <th className="py-3 px-3">القسم الدراسي</th>
                   <th className="py-3 px-3 hidden sm:table-cell">تاريخ الميلاد</th>
                   <th className="py-3 px-3 text-center">رمز التفعيل (6 أرقام)</th>
-                  {showSchoolIds && (
-                    <th className="py-3 px-3 hidden md:table-cell text-left" dir="ltr">
-                      رقم التعريف المدرسي
-                    </th>
-                  )}
                   <th className="py-3 px-3 text-center print:hidden w-24">إجراء</th>
                 </tr>
               </thead>
@@ -782,11 +761,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
                           {s.activationCode}
                         </span>
                       </td>
-                      {showSchoolIds && (
-                        <td className="py-2.5 px-3 hidden md:table-cell font-mono text-xs text-slate-600 text-left" dir="ltr">
-                          {s.identifier}
-                        </td>
-                      )}
                       <td className="py-2.5 px-3 text-center print:hidden">
                         <button
                           type="button"
@@ -880,11 +854,6 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
 
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>سري وشخصي للتلميذ(ة)</span>
-                  {showSchoolIds && (
-                    <span className="font-mono" dir="ltr">
-                      {s.identifier}
-                    </span>
-                  )}
                 </div>
               </div>
             );
