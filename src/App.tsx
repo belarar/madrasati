@@ -45,10 +45,11 @@ import {
   getAnnouncements,
   getCurrentUser,
   getDocuments,
-  getNotifications,
+  getRelevantNotifications,
   getSummons,
   getUnreadNotificationsCount,
   initStorage,
+  markAnnouncementAsSeen,
   setCurrentUser,
   syncWithServer,
 } from './services/storageService';
@@ -59,6 +60,7 @@ import {
   SchoolDocument,
   UserProfile,
 } from './types';
+import { AnnouncementCard } from './components/common/AnnouncementCard';
 
 export default function App() {
   const [currentUser, setUser] = useState<UserProfile | null>(null);
@@ -72,18 +74,22 @@ export default function App() {
 
   // Notifications & Document Preview State
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => getNotifications());
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    getRelevantNotifications(getCurrentUser())
+  );
   const [unreadNotifsCount, setUnreadNotifsCount] = useState<number>(0);
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
+  const [selectedAnnouncementModal, setSelectedAnnouncementModal] =
+    useState<SchoolAnnouncement | null>(null);
 
   const refreshAllData = () => {
-    setUser(getCurrentUser());
+    const u = getCurrentUser();
+    setUser(u);
     setDocuments(getDocuments());
     setAnnouncements(getAnnouncements());
     setSummons(getSummons());
-    const notifs = getNotifications();
-    setNotifications(notifs);
-    setUnreadNotifsCount(getUnreadNotificationsCount(getCurrentUser()?.identifier));
+    setNotifications(getRelevantNotifications(u));
+    setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier, u));
   };
 
   useEffect(() => {
@@ -93,15 +99,16 @@ export default function App() {
     const handleAuthChange = () => {
       const u = getCurrentUser();
       setUser(u);
-      setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier));
+      setNotifications(getRelevantNotifications(u));
+      setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier, u));
     };
     const handleDocsChange = () => setDocuments(getDocuments());
     const handleAnnsChange = () => setAnnouncements(getAnnouncements());
     const handleSummonsChange = () => setSummons(getSummons());
     const handleNotifsChange = () => {
-      const notifs = getNotifications();
-      setNotifications(notifs);
-      setUnreadNotifsCount(getUnreadNotificationsCount(getCurrentUser()?.identifier));
+      const u = getCurrentUser();
+      setNotifications(getRelevantNotifications(u));
+      setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier, u));
     };
 
     window.addEventListener('auth-change', handleAuthChange);
@@ -383,7 +390,7 @@ export default function App() {
       </main>
 
       {/* Footer */}
-      <footer className="bg-white border-t border-slate-200 mt-12 py-8 text-xs text-slate-500">
+      <footer className="bg-white border-t border-slate-200 mt-12 py-8 text-xs text-slate-500 print:hidden">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="text-center sm:text-right">
             <p className="font-bold text-slate-800 text-sm">{SCHOOL_NAME}</p>
@@ -403,19 +410,73 @@ export default function App() {
       </footer>
 
       {/* Mobile Bottom Navigation */}
-      <MobileBottomNav
-        currentUser={currentUser}
-        onOpenSwitch={() => setLoginModalOpen(true)}
-        onOpenPwaInstall={() => setPwaModalOpen(true)}
-        onOpenNotifications={() => setNotificationsModalOpen(true)}
-        unreadNotificationsCount={unreadNotifsCount}
-      />
+      <div className="print:hidden">
+        <MobileBottomNav
+          currentUser={currentUser}
+          onOpenSwitch={() => setLoginModalOpen(true)}
+          onOpenPwaInstall={() => setPwaModalOpen(true)}
+          onOpenNotifications={() => setNotificationsModalOpen(true)}
+          unreadNotificationsCount={unreadNotifsCount}
+        />
+      </div>
 
-      {/* Real-time Notification Alert Toast (Audio Chime + Popup Banner) */}
+      {/* Real-time Notification Alert Toast (Fresh Events Only) */}
       <NotificationToast
         onOpenDocument={doc => setPreviewDoc(doc)}
+        onOpenAnnouncement={ann => {
+          setSelectedAnnouncementModal(ann);
+          if (currentUser) {
+            markAnnouncementAsSeen(ann.id, currentUser.identifier);
+          }
+        }}
         onOpenAllNotifications={() => setNotificationsModalOpen(true)}
       />
+
+      {/* Single Announcement Quick Reader Modal */}
+      {selectedAnnouncementModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-150 print:hidden">
+          <div className="bg-white w-full max-w-xl rounded-3xl shadow-2xl border border-slate-200 overflow-hidden text-right">
+            <div className="bg-gradient-to-r from-emerald-800 to-teal-800 text-white px-5 py-4 flex items-center justify-between">
+              <h3 className="font-bold text-sm sm:text-base">تفاصيل الإعلان الجديد</h3>
+              <button
+                type="button"
+                onClick={() => setSelectedAnnouncementModal(null)}
+                className="px-3 py-1 rounded-xl bg-white/15 hover:bg-white/25 text-xs font-bold cursor-pointer"
+              >
+                إغلاق
+              </button>
+            </div>
+            <div className="p-4 sm:p-5 max-h-[75vh] overflow-y-auto">
+              <AnnouncementCard
+                announcement={selectedAnnouncementModal}
+                currentUser={currentUser}
+                onPreviewAttachment={ann => {
+                  if (ann.fileName) {
+                    setPreviewDoc({
+                      id: ann.id,
+                      title: ann.title,
+                      description: ann.content,
+                      subject: 'admin',
+                      docType: 'circular',
+                      fileFormat: ann.fileFormat || 'pdf',
+                      fileName: ann.fileName,
+                      fileSize: ann.fileSize || '1 MB',
+                      fileDataUrl: ann.fileDataUrl,
+                      authorId: 'director',
+                      authorName: ann.authorName,
+                      authorRole: 'director',
+                      targetClasses: ['ALL'],
+                      uploadDate: ann.createdAt,
+                      downloadCount: 0,
+                    });
+                    setSelectedAnnouncementModal(null);
+                  }
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Direct Document Preview Modal */}
       <DocumentPreviewModal
@@ -432,7 +493,17 @@ export default function App() {
         onSelectNotification={notif => {
           if (notif.type === 'document' && notif.sourceId) {
             const d = documents.find(doc => doc.id === notif.sourceId);
-            if (d) setPreviewDoc(d);
+            if (d) {
+              setPreviewDoc(d);
+              setNotificationsModalOpen(false);
+            }
+          } else if (notif.type === 'announcement' && notif.sourceId) {
+            const a = announcements.find(ann => ann.id === notif.sourceId);
+            if (a) {
+              setSelectedAnnouncementModal(a);
+              if (currentUser) markAnnouncementAsSeen(a.id, currentUser.identifier);
+              setNotificationsModalOpen(false);
+            }
           }
         }}
       />

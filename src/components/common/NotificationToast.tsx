@@ -12,8 +12,6 @@ import {
 import { AppNotification, SchoolDocument, SchoolAnnouncement } from '../../types';
 import { getDocuments, getAnnouncements } from '../../services/storageService';
 import {
-  isNotificationSupported,
-  requestNotificationPermission,
   playNotificationChime,
 } from '../../services/notificationService';
 
@@ -29,18 +27,9 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
   onOpenAllNotifications,
 }) => {
   const [currentNotif, setCurrentNotif] = useState<AppNotification | null>(null);
-  const [showPermissionBanner, setShowPermissionBanner] = useState(false);
   const timerRef = useRef<any>(null);
 
   useEffect(() => {
-    // Check if permission prompt can be offered
-    if (isNotificationSupported() && Notification.permission === 'default') {
-      const dismissed = sessionStorage.getItem('notif_perm_dismissed');
-      if (!dismissed) {
-        setShowPermissionBanner(true);
-      }
-    }
-
     const handleNewNotif = (e: any) => {
       const notif: AppNotification = e.detail;
       if (!notif) return;
@@ -51,10 +40,10 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
         clearTimeout(timerRef.current);
       }
 
-      // Auto close after 8.5 seconds
+      // Auto close after 6.5 seconds
       timerRef.current = setTimeout(() => {
         setCurrentNotif(null);
-      }, 8500);
+      }, 6500);
     };
 
     window.addEventListener('notification-received', handleNewNotif);
@@ -64,20 +53,6 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
       if (timerRef.current) clearTimeout(timerRef.current);
     };
   }, []);
-
-  const handleEnableBrowserNotifications = async () => {
-    const res = await requestNotificationPermission();
-    setShowPermissionBanner(false);
-    sessionStorage.setItem('notif_perm_dismissed', '1');
-    if (res === 'granted') {
-      playNotificationChime();
-    }
-  };
-
-  const handleDismissBanner = () => {
-    setShowPermissionBanner(false);
-    sessionStorage.setItem('notif_perm_dismissed', '1');
-  };
 
   const handleActionClick = () => {
     if (!currentNotif) return;
@@ -110,53 +85,12 @@ export const NotificationToast: React.FC<NotificationToastProps> = ({
 
   return (
     <>
-      {/* 1. Browser Notification Permission Prompt (Gentle Non-intrusive Banner) */}
-      {showPermissionBanner && (
-        <div className="fixed top-18 sm:top-20 left-4 right-4 sm:left-auto sm:right-6 sm:w-96 z-50 bg-emerald-900/95 backdrop-blur-md text-white p-4 rounded-2xl shadow-2xl border border-emerald-500/40 animate-slide-in">
-          <div className="flex items-start gap-3">
-            <div className="w-9 h-9 rounded-xl bg-emerald-700/80 flex items-center justify-center shrink-0 text-emerald-200">
-              <Bell className="w-5 h-5 animate-pulse" />
-            </div>
-            <div className="flex-1">
-              <h4 className="text-sm font-bold">تفعيل التنبيهات المباشرة</h4>
-              <p className="text-xs text-emerald-100/90 mt-1 leading-relaxed">
-                هل ترغب في تلقي إشعار فوري بصوت مميز فور نشر وثيقة أو إعلان جديد؟
-              </p>
-              <div className="flex items-center gap-2 mt-3">
-                <button
-                  type="button"
-                  onClick={handleEnableBrowserNotifications}
-                  className="px-3.5 py-1.5 rounded-xl bg-white text-emerald-900 font-bold text-xs hover:bg-emerald-50 active:scale-95 transition-all shadow-sm cursor-pointer"
-                >
-                  تفعيل الآن
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDismissBanner}
-                  className="px-2.5 py-1.5 rounded-xl bg-emerald-800/60 text-emerald-200 hover:text-white font-medium text-xs hover:bg-emerald-800 transition-all cursor-pointer"
-                >
-                  لاحقاً
-                </button>
-              </div>
-            </div>
-            <button
-              type="button"
-              onClick={handleDismissBanner}
-              className="text-emerald-300 hover:text-white p-1 rounded-lg hover:bg-emerald-800/50"
-              title="إغلاق"
-            >
-              <X className="w-4 h-4" />
-            </button>
-          </div>
-        </div>
-      )}
-
-      {/* 2. Real-time Incoming Notification Toast */}
+      {/* Real-time Incoming Notification Toast (only fires for genuine fresh events after startup) */}
       {currentNotif && (
         <div
           role="alert"
           aria-live="assertive"
-          className="fixed top-20 sm:top-24 left-4 right-4 sm:left-auto sm:right-6 sm:w-[420px] z-50 bg-slate-900/95 backdrop-blur-lg text-white rounded-2xl shadow-2xl border border-slate-700/80 p-4 transition-all duration-300 animate-in fade-in slide-in-from-top-4"
+          className="fixed top-20 sm:top-24 left-4 right-4 sm:left-auto sm:right-6 sm:w-[420px] z-50 bg-slate-900/95 backdrop-blur-lg text-white rounded-2xl shadow-2xl border border-slate-700/80 p-4 transition-all duration-300 animate-in fade-in slide-in-from-top-4 print:hidden"
         >
           {/* Header */}
           <div className="flex items-start justify-between gap-3">

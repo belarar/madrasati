@@ -6,12 +6,14 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  Globe,
   GraduationCap,
   KeyRound,
   LayoutGrid,
   List,
   Plus,
   Printer,
+  RotateCcw,
   Search,
   ShieldCheck,
   Users,
@@ -42,6 +44,23 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
   const [showSchoolIds, setShowSchoolIds] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [bulkCopied, setBulkCopied] = useState(false);
+
+  const defaultSiteUrl = typeof window !== 'undefined' ? window.location.origin : '';
+  const [siteUrl, setSiteUrl] = useState<string>(() => {
+    try {
+      const saved = localStorage.getItem('ben_naama_platform_url');
+      return saved && saved.trim() ? saved.trim() : defaultSiteUrl;
+    } catch {
+      return defaultSiteUrl;
+    }
+  });
+
+  const handleSiteUrlChange = (val: string) => {
+    setSiteUrl(val);
+    try {
+      localStorage.setItem('ben_naama_platform_url', val.trim());
+    } catch {}
+  };
 
   useEffect(() => {
     const reload = () => setStudents(getStudentActivationDirectory());
@@ -97,13 +116,15 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
   };
 
   const handleCopyListText = async () => {
+    const cleanSiteUrl = siteUrl.trim() || defaultSiteUrl;
     const lines = [
       `${SCHOOL_NAME} - قائمة رموز تفعيل التلاميذ (${selectedClassName})`,
+      cleanSiteUrl ? `رابط الدخول إلى المنصة: ${cleanSiteUrl}` : '',
       '======================================================',
       ...filteredStudents.map(
         (s, idx) => `${idx + 1}. ${s.name} | ${s.className} | رمز التفعيل: ${s.activationCode}`
       ),
-    ];
+    ].filter(Boolean);
     const payload = lines.join('\n');
     try {
       await navigator.clipboard.writeText(payload);
@@ -176,6 +197,11 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
         <p className="text-xs font-bold text-slate-700">
           القسم: {selectedClassName} • العدد الإجمالي: {filteredStudents.length} تلميذ(ة)
         </p>
+        {(siteUrl.trim() || defaultSiteUrl) && (
+          <p className="text-xs font-bold text-emerald-900">
+            رابط المنصة: <span className="font-mono" dir="ltr">{siteUrl.trim() || defaultSiteUrl}</span>
+          </p>
+        )}
       </div>
 
       {/* Interactive Management Header Card */}
@@ -255,8 +281,37 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
         <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 flex items-start gap-2.5">
           <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
           <span>
-            <strong>تنبيه تنظيمي:</strong> هذه القائمة مخصصة للسيد المدير والسيدة الناظرة فقط لتوزيع رموز التفعيل على التلاميذ. يُستحسن اختيار القسم الدراسي ثم الضغط على <strong>"بطاقات قصاصات التوزيع"</strong> لطباعة قصاصة فردية لكل تلميذ وتوزيعها بسرية.
+            <strong>تنبيه تنظيمي:</strong> هذه القائمة مخصصة للسيد المدير والسيدة الناظرة فقط لتوزيع رموز التفعيل على التلاميذ. يُستحسن اختيار القسم الدراسي ثم الضغط على <strong>"قصاصات التوزيع الفردية"</strong> لطباعة قصاصة فردية لكل تلميذ تحوي رابط المنصة ورمزه السري.
           </span>
+        </div>
+
+        {/* Platform URL field included in every printed student slip */}
+        <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-3 flex flex-col sm:flex-row sm:items-center gap-2.5">
+          <div className="flex items-center gap-2 text-xs font-black text-emerald-950 shrink-0">
+            <Globe className="w-4 h-4 text-emerald-700" />
+            <span>رابط الموقع المطبوع في قصاصة التلاميذ:</span>
+          </div>
+          <div className="flex-1 flex items-center gap-2">
+            <input
+              type="url"
+              value={siteUrl}
+              onChange={e => handleSiteUrlChange(e.target.value)}
+              placeholder="https://..."
+              dir="ltr"
+              className="flex-1 px-3 py-1.5 rounded-xl border border-emerald-300 bg-white text-xs font-mono font-bold text-emerald-950 outline-none focus:border-emerald-700"
+            />
+            {siteUrl !== defaultSiteUrl && defaultSiteUrl && (
+              <button
+                type="button"
+                onClick={() => handleSiteUrlChange(defaultSiteUrl)}
+                className="px-2.5 py-1.5 rounded-xl bg-white hover:bg-emerald-100 text-emerald-900 border border-emerald-300 text-[11px] font-bold flex items-center gap-1 shrink-0 cursor-pointer"
+                title="استعادة الرابط الحالي للمنصة"
+              >
+                <RotateCcw className="w-3.5 h-3.5" />
+                <span>الرابط الحالي</span>
+              </button>
+            )}
+          </div>
         </div>
 
         {/* Search, View Switch & Class Filters */}
@@ -484,6 +539,24 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
                     {s.activationCode}
                   </div>
                 </div>
+
+                {(siteUrl.trim() || defaultSiteUrl) && (
+                  <div className="bg-slate-50 border border-slate-200 rounded-xl px-2.5 py-2 space-y-0.5">
+                    <div className="flex items-center gap-1 text-[10px] font-bold text-slate-700">
+                      <Globe className="w-3 h-3 text-emerald-700 shrink-0" />
+                      <span>رابط الدخول إلى المنصة:</span>
+                    </div>
+                    <div
+                      dir="ltr"
+                      className="font-mono text-[10px] font-bold text-emerald-900 break-all select-all"
+                    >
+                      {siteUrl.trim() || defaultSiteUrl}
+                    </div>
+                    <p className="text-[9px] text-slate-500 pt-0.5">
+                      افتح الرابط ← اختر «فضاء التلاميذ» ← أدخل رمز التفعيل أعلاه
+                    </p>
+                  </div>
+                )}
 
                 <div className="flex items-center justify-between text-[10px] text-slate-500">
                   <span>سري وشخصي للتلميذ(ة)</span>

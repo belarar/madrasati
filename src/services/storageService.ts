@@ -93,6 +93,11 @@ let cachedSummons: ParentSummon[] | null = null;
 let cachedPeerExchanges: PeerExchangePost[] | null = null;
 let cachedStaffPins: Record<string, StaffPinRecord> | null = null;
 
+// Startup & spam protection for notifications
+const APP_BOOT_MS = Date.now();
+let initialNotifsHydrated = false;
+const sessionAlertedNotifIds = new Set<string>();
+
 export function normalizeIdentifier(raw: string): string {
   if (!raw) return '';
   return raw
@@ -369,12 +374,9 @@ export function initStorage(): void {
           safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(liveNotifs));
           window.dispatchEvent(new Event('notifications-change'));
 
-          // Trigger audio & toast notification alert for any brand-new incoming items
-          if (brandNew.length > 0 && currentNotifs.length > 0) {
-            brandNew.forEach(n => {
-              triggerNotificationAlert(n);
-            });
-          }
+          // Only alert once for the single newest genuinely fresh notification relevant to logged-in user (no startup/archive spam)
+          maybeAlertSingleFreshNotification(brandNew);
+          initialNotifsHydrated = true;
         }
       },
       onPasswordResetRequests: (liveRequests) => {
@@ -1522,7 +1524,7 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
     ).catch(() => {});
   }
 
-  // Auto-generate notification for announcement
+  // Auto-generate notification for target recipients without disturbing the author
   const annNotif: AppNotification = {
     id: 'notif-ann-' + Date.now(),
     type: 'announcement',
@@ -1534,7 +1536,8 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
     createdAt: new Date().toISOString(),
     readBy: [],
   };
-  addNotificationLocally(annNotif, true);
+  sessionAlertedNotifIds.add(annNotif.id);
+  addNotificationLocally(annNotif, false);
 
   // 1. Direct Cloud Database Save (Firebase Firestore)
   saveAnnouncementToFirestore(newAnn).catch(err => {
@@ -2757,11 +2760,8 @@ export async function syncWithServer(): Promise<void> {
       safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(serverNotifs));
       window.dispatchEvent(new Event('notifications-change'));
 
-      if (brandNew.length > 0 && currentNotifs.length > 0) {
-        brandNew.forEach(n => {
-          triggerNotificationAlert(n);
-        });
-      }
+      maybeAlertSingleFreshNotification(brandNew);
+      initialNotifsHydrated = true;
     }
 
     // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
@@ -2824,7 +2824,94 @@ export async function syncWithServer(): Promise<void> {
   }
 }
 
-// ================= دوال إدارة التنبيهات (Notifications) =================
+// ================= دوال إدارة التنبيهات والإعلانات المقروءة (Notifications & Seen Announcements) =================
+
+export function isNotificationRelevantToUser(
+  notif: AppNotification,
+  user: UserProfile | null
+): boolean {
+  if (!user) return false;
+
+  if (notif.targetUserId) {
+    return normalizeIdentifier(notif.targetUserId) === normalizeIdentifier(user.identifier);
+  }
+
+  if (notif.targetClassId) {
+    if (user.role === 'student') {
+      return user.classId === notif.targetClassId;
+    }
+    return true;
+  }
+
+  if (!notif.targetRole || notif.targetRole === 'all') return true;
+  if (user.role === 'student') return notif.targetRole === 'students';
+  if (user.role === 'teacher') return notif.targetRole === 'teachers';
+  return (
+    notif.targetRole === user.role ||
+    notif.targetRole === 'staff' ||
+    notif.targetRole === 'teachers'
+  );
+}
+
+export function getRelevantNotifications(user: UserProfile | null): AppNotification[] {
+  if (!user) return [];
+  return getNotifications().filter(n => isNotificationRelevantToUser(n, user));
+}
+
+function maybeAlertSingleFreshNotification(candidates: AppNotification[]): void {
+  const user = getCurrentUser();
+  if (!user || !initialNotifsHydrated) return;
+  // Ignore startup grace period so opening the app never triggers noisy sound/popups
+  if (Date.now() - APP_BOOT_MS < 4000) return;
+
+  const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+  const freshRelevant = candidates
+    .filter(n => {
+      if (sessionAlertedNotifIds.has(n.id)) return false;
+      if (n.readBy && n.readBy.includes(user.identifier)) return false;
+      if (!isNotificationRelevantToUser(n, user)) return false;
+      const createdMs = new Date(n.createdAt).getTime();
+      return !Number.isNaN(createdMs) && createdMs >= tenMinutesAgo;
+    })
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+  if (freshRelevant.length > 0) {
+    const latest = freshRelevant[0];
+    freshRelevant.forEach(n => sessionAlertedNotifIds.add(n.id));
+    triggerNotificationAlert(latest);
+  }
+}
+
+export function getSeenAnnouncementIds(userId?: string): string[] {
+  if (!userId) return [];
+  try {
+    const raw = localStorage.getItem(`ben_naama_seen_anns_${normalizeIdentifier(userId)}`);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export function markAnnouncementAsSeen(announcementId: string, userId?: string): void {
+  if (!userId || !announcementId) return;
+  const key = `ben_naama_seen_anns_${normalizeIdentifier(userId)}`;
+  const existing = getSeenAnnouncementIds(userId);
+  if (!existing.includes(announcementId)) {
+    const updated = [announcementId, ...existing].slice(0, 200);
+    safeSetItem(key, JSON.stringify(updated));
+    window.dispatchEvent(new Event('seen-announcements-change'));
+  }
+}
+
+export function markAllAnnouncementsAsSeen(announcementIds: string[], userId?: string): void {
+  if (!userId || announcementIds.length === 0) return;
+  const key = `ben_naama_seen_anns_${normalizeIdentifier(userId)}`;
+  const existing = getSeenAnnouncementIds(userId);
+  const merged = Array.from(new Set([...announcementIds, ...existing])).slice(0, 200);
+  safeSetItem(key, JSON.stringify(merged));
+  window.dispatchEvent(new Event('seen-announcements-change'));
+}
 
 export function addNotificationLocally(notif: AppNotification, shouldAlert: boolean = true): void {
   const notifs = getNotifications();
@@ -2833,7 +2920,11 @@ export function addNotificationLocally(notif: AppNotification, shouldAlert: bool
   safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(updated));
   window.dispatchEvent(new Event('notifications-change'));
   if (shouldAlert) {
-    triggerNotificationAlert(notif);
+    const user = getCurrentUser();
+    if (user && isNotificationRelevantToUser(notif, user) && !sessionAlertedNotifIds.has(notif.id)) {
+      sessionAlertedNotifIds.add(notif.id);
+      triggerNotificationAlert(notif);
+    }
   }
 }
 
@@ -2846,13 +2937,13 @@ export function getNotifications(): AppNotification[] {
   }
 }
 
-export function getUnreadNotificationsCount(userId?: string): number {
-  if (!userId) {
-    const notifs = getNotifications();
-    return notifs.length;
+export function getUnreadNotificationsCount(userId?: string, user?: UserProfile | null): number {
+  const activeUser = user ?? getCurrentUser();
+  if (!userId || !activeUser) {
+    return 0;
   }
-  const notifs = getNotifications();
-  return notifs.filter(n => !n.readBy || !n.readBy.includes(userId)).length;
+  const relevant = getRelevantNotifications(activeUser);
+  return relevant.filter(n => !n.readBy || !n.readBy.includes(userId)).length;
 }
 
 export async function markNotificationAsRead(notifId: string, userId: string): Promise<void> {

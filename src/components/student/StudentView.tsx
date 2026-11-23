@@ -6,7 +6,10 @@ import {
   BookMarked,
   BookOpen,
   Calendar,
+  CheckCheck,
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   Download,
   Edit3,
   Eye,
@@ -32,6 +35,9 @@ import { getTeachersForClass, isTeacherAssignedToClass } from '../../data/offici
 import {
   getPeerExchanges,
   getPrivateConversations,
+  getSeenAnnouncementIds,
+  markAllAnnouncementsAsSeen,
+  markAnnouncementAsSeen,
   registerNewUser,
   setCurrentUser,
 } from '../../services/storageService';
@@ -77,13 +83,25 @@ export const StudentView: React.FC<StudentViewProps> = ({
   const [conversationsCount, setConversationsCount] = useState(() =>
     getPrivateConversations(currentUser.identifier).length
   );
+  const [seenAnnIds, setSeenAnnIds] = useState<string[]>(() =>
+    getSeenAnnouncementIds(currentUser.identifier)
+  );
+  const [showPastAnnouncements, setShowPastAnnouncements] = useState(false);
 
   React.useEffect(() => {
+    setSeenAnnIds(getSeenAnnouncementIds(currentUser.identifier));
     const handleConvChange = () => {
       setConversationsCount(getPrivateConversations(currentUser.identifier).length);
     };
+    const handleSeenAnnsChange = () => {
+      setSeenAnnIds(getSeenAnnouncementIds(currentUser.identifier));
+    };
     window.addEventListener('private-conversations-change', handleConvChange);
-    return () => window.removeEventListener('private-conversations-change', handleConvChange);
+    window.addEventListener('seen-announcements-change', handleSeenAnnsChange);
+    return () => {
+      window.removeEventListener('private-conversations-change', handleConvChange);
+      window.removeEventListener('seen-announcements-change', handleSeenAnnsChange);
+    };
   }, [currentUser.identifier]);
 
   // Edit Profile States
@@ -229,12 +247,22 @@ export const StudentView: React.FC<StudentViewProps> = ({
     });
   }, [documents, scopeFilter, studentClassId, currentUser.className, currentUser.identifier, currentUser.name, selectedSubject, selectedType, selectedTeacherId, searchQuery]);
 
-  // Announcements targeted to students or all
+  // Announcements targeted to students or all (sorted newest-first)
   const studentAnnouncements = useMemo(() => {
-    return announcements.filter(
-      a => a.target === 'students' || a.target === 'all'
-    );
+    return announcements
+      .filter(a => a.target === 'students' || a.target === 'all')
+      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [announcements]);
+
+  const unreadAnnouncements = useMemo(() => {
+    return studentAnnouncements.filter(a => !seenAnnIds.includes(a.id));
+  }, [studentAnnouncements, seenAnnIds]);
+
+  const readAnnouncements = useMemo(() => {
+    return studentAnnouncements.filter(a => seenAnnIds.includes(a.id));
+  }, [studentAnnouncements, seenAnnIds]);
+
+  const latestUnreadAnn = unreadAnnouncements[0] || null;
 
   const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
     if (ann.fileName) {
@@ -342,10 +370,18 @@ export const StudentView: React.FC<StudentViewProps> = ({
               <span className="text-2xl font-black text-emerald-300">{classPeerPosts.length}</span>
             </button>
 
-            <div className="bg-white/10 backdrop-blur-md rounded-2xl p-3.5 border border-white/15 min-w-[100px] text-center">
+            <button
+              type="button"
+              onClick={() => setActiveTab('announcements')}
+              className={`backdrop-blur-md rounded-2xl p-3.5 border min-w-[100px] text-center transition-all cursor-pointer ${
+                unreadAnnouncements.length > 0
+                  ? 'bg-amber-400/25 hover:bg-amber-400/35 border-amber-300/50'
+                  : 'bg-white/10 hover:bg-white/20 border-white/15'
+              }`}
+            >
               <span className="text-xs text-emerald-200 block mb-0.5 font-medium">إعلانات جديدة</span>
-              <span className="text-2xl font-black text-white">{studentAnnouncements.length}</span>
-            </div>
+              <span className="text-2xl font-black text-white">{unreadAnnouncements.length}</span>
+            </button>
 
             {studentSummons.length > 0 && (
               <button
@@ -380,6 +416,56 @@ export const StudentView: React.FC<StudentViewProps> = ({
           </div>
         )}
       </div>
+
+      {/* Quiet Single New Announcement Notice (ONLY shows latest unread announcement, never all announcements) */}
+      {latestUnreadAnn && activeTab !== 'announcements' && (
+        <div className="bg-gradient-to-l from-amber-50 via-white to-emerald-50/70 border border-amber-300/90 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
+          <div className="flex items-start gap-3 min-w-0">
+            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 border border-amber-200 flex items-center justify-center shrink-0 mt-0.5">
+              <Bell className="w-5 h-5" />
+            </div>
+            <div className="min-w-0 space-y-1">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-600 text-white">
+                  إعلان جديد للتلاميذ
+                </span>
+                <span className="text-xs text-slate-500 font-medium">
+                  {latestUnreadAnn.authorName} • {new Date(latestUnreadAnn.createdAt).toLocaleDateString('ar-DZ')}
+                </span>
+                {unreadAnnouncements.length > 1 && (
+                  <span className="text-[11px] text-amber-800 font-semibold">
+                    (و{unreadAnnouncements.length - 1} إعلان آخر غير مقروء)
+                  </span>
+                )}
+              </div>
+              <h3 className="text-sm sm:text-base font-extrabold text-slate-900 truncate">
+                {latestUnreadAnn.title}
+              </h3>
+              <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                {latestUnreadAnn.content}
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+            <button
+              type="button"
+              onClick={() => setActiveTab('announcements')}
+              className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+            >
+              قراءة الإعلان
+            </button>
+            <button
+              type="button"
+              onClick={() => markAnnouncementAsSeen(latestUnreadAnn.id, currentUser.identifier)}
+              className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs transition-colors cursor-pointer"
+              title="إخفاء هذا الإشعار"
+            >
+              تم الاطلاع ✓
+            </button>
+          </div>
+        </div>
+      )}
 
       {/* Main Tabs Navigation */}
       <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
@@ -447,7 +533,12 @@ export const StudentView: React.FC<StudentViewProps> = ({
             }`}
           >
             <Bell className="w-4 h-4" />
-            <span>الإعلانات والتوجيهات ({studentAnnouncements.length})</span>
+            <span>الإعلانات والتوجيهات</span>
+            {unreadAnnouncements.length > 0 && (
+              <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full font-bold">
+                {unreadAnnouncements.length} جديد
+              </span>
+            )}
           </button>
 
           {studentSummons.length > 0 && (
@@ -816,29 +907,124 @@ export const StudentView: React.FC<StudentViewProps> = ({
         </div>
       )}
 
-      {/* View: Announcements */}
+      {/* View: Announcements (New announcements shown first; older archive collapsed by default) */}
       {activeTab === 'announcements' && (
         <div className="space-y-4">
-          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex items-center justify-between">
+          <div className="bg-white p-4 rounded-2xl border border-slate-200 flex flex-wrap items-center justify-between gap-3">
             <h2 className="font-bold text-slate-900 text-base flex items-center gap-2">
               <Bell className="w-5 h-5 text-emerald-700" />
               <span>إعلانات إدارة المتوسطة والناظر الموجهة للتلاميذ</span>
             </h2>
-            <span className="text-xs text-slate-500">
-              إجمالي الإعلانات: {studentAnnouncements.length}
-            </span>
+            <div className="flex items-center gap-2">
+              {unreadAnnouncements.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() =>
+                    markAllAnnouncementsAsSeen(
+                      unreadAnnouncements.map(a => a.id),
+                      currentUser.identifier
+                    )
+                  }
+                  className="px-3 py-1.5 rounded-xl bg-emerald-50 hover:bg-emerald-100 text-emerald-800 border border-emerald-200 text-xs font-bold flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <CheckCheck className="w-3.5 h-3.5" />
+                  <span>تعليم الكل كمقروء</span>
+                </button>
+              )}
+              <span className="text-xs text-slate-500">
+                {unreadAnnouncements.length > 0
+                  ? `${unreadAnnouncements.length} إعلان جديد`
+                  : 'لا توجد إعلانات جديدة'}
+              </span>
+            </div>
           </div>
 
-          <div className="space-y-4">
-            {studentAnnouncements.map(ann => (
-              <AnnouncementCard
-                key={ann.id}
-                announcement={ann}
-                currentUser={currentUser}
-                onPreviewAttachment={handlePreviewAnnAttachment}
-              />
-            ))}
-          </div>
+          {unreadAnnouncements.length > 0 ? (
+            <div className="space-y-4">
+              {unreadAnnouncements.map(ann => (
+                <div key={ann.id} className="space-y-2">
+                  <div className="flex items-center justify-between px-1">
+                    <span className="inline-flex items-center gap-1.5 px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-100 text-amber-900 border border-amber-300">
+                      إعلان جديد
+                    </span>
+                    <button
+                      type="button"
+                      onClick={() => markAnnouncementAsSeen(ann.id, currentUser.identifier)}
+                      className="text-xs font-bold text-emerald-700 hover:text-emerald-900 hover:underline cursor-pointer"
+                    >
+                      تم الاطلاع ✓
+                    </button>
+                  </div>
+                  <AnnouncementCard
+                    announcement={ann}
+                    currentUser={currentUser}
+                    onPreviewAttachment={handlePreviewAnnAttachment}
+                  />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="space-y-4">
+              <div className="bg-emerald-50/70 border border-emerald-200 rounded-2xl p-4 flex items-center gap-3 text-xs sm:text-sm text-emerald-900">
+                <CheckCircle2 className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span className="font-semibold">
+                  اطلعت على جميع الإعلانات الجديدة. يظهر أدناه آخر إعلان منشور فقط، ويمكنك فتح الأرشيف عند الحاجة.
+                </span>
+              </div>
+              {readAnnouncements[0] && (
+                <AnnouncementCard
+                  key={readAnnouncements[0].id}
+                  announcement={readAnnouncements[0]}
+                  currentUser={currentUser}
+                  onPreviewAttachment={handlePreviewAnnAttachment}
+                />
+              )}
+            </div>
+          )}
+
+          {readAnnouncements.length > (unreadAnnouncements.length === 0 ? 1 : 0) && (
+            <div className="pt-2">
+              <button
+                type="button"
+                onClick={() => setShowPastAnnouncements(prev => !prev)}
+                className="w-full py-2.5 px-4 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold border border-slate-200 flex items-center justify-center gap-2 transition-colors cursor-pointer"
+              >
+                {showPastAnnouncements ? (
+                  <>
+                    <ChevronUp className="w-4 h-4" />
+                    <span>إخفاء أرشيف الإعلانات السابقة</span>
+                  </>
+                ) : (
+                  <>
+                    <ChevronDown className="w-4 h-4" />
+                    <span>
+                      عرض أرشيف الإعلانات السابقة (
+                      {unreadAnnouncements.length === 0
+                        ? readAnnouncements.length - 1
+                        : readAnnouncements.length}
+                      )
+                    </span>
+                  </>
+                )}
+              </button>
+
+              {showPastAnnouncements && (
+                <div className="space-y-4 mt-4">
+                  {(unreadAnnouncements.length === 0
+                    ? readAnnouncements.slice(1)
+                    : readAnnouncements
+                  ).map(ann => (
+                    <AnnouncementCard
+                      key={ann.id}
+                      announcement={ann}
+                      currentUser={currentUser}
+                      onPreviewAttachment={handlePreviewAnnAttachment}
+                    />
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

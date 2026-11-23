@@ -29,7 +29,7 @@ import {
 } from 'lucide-react';
 import { MOCK_USERS, SCHOOL_NAME } from '../data/mockData';
 import {
-  getNotifications,
+  getRelevantNotifications,
   getSyncStatus,
   getUnreadNotificationsCount,
   setCurrentUser,
@@ -53,7 +53,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
 
   // Notifications Modal State
   const [notificationsOpen, setNotificationsOpen] = useState(false);
-  const [notifications, setNotifications] = useState<AppNotification[]>(() => getNotifications());
+  const [notifications, setNotifications] = useState<AppNotification[]>(() =>
+    getRelevantNotifications(currentUser)
+  );
   const [unreadCount, setUnreadCount] = useState<number>(0);
 
   // PWA Install State
@@ -78,9 +80,9 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   // Sync notifications & connection status on mount & event
   useEffect(() => {
     const updateNotifs = () => {
-      const list = getNotifications();
+      const list = getRelevantNotifications(currentUser);
       setNotifications(list);
-      setUnreadCount(getUnreadNotificationsCount(currentUser?.identifier));
+      setUnreadCount(getUnreadNotificationsCount(currentUser?.identifier, currentUser));
     };
 
     const handleSyncStatus = (e: any) => {
@@ -230,7 +232,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   };
 
   return (
-    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs">
+    <header className="sticky top-0 z-40 bg-white/95 backdrop-blur-md border-b border-slate-200/80 shadow-xs print:hidden">
       {/* Algerian Institutional Top Ribbon */}
       <div className="h-1.5 w-full bg-gradient-to-r from-emerald-700 via-white to-red-600" />
 
@@ -311,19 +313,21 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
               )}
             </button>
 
-            {/* 1. Notifications Bell Button */}
-            <button
-              onClick={() => setNotificationsOpen(true)}
-              className="relative p-2.5 rounded-xl bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-900 border border-slate-200 transition-all shadow-2xs active:scale-95"
-              title="الإشعارات والتنبيهات المدرسية"
-            >
-              <Bell className="w-4 h-4 text-emerald-800" />
-              {unreadCount > 0 && (
-                <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-rose-600 text-white rounded-full text-[10px] font-bold flex items-center justify-center animate-pulse shadow-xs">
-                  {unreadCount > 9 ? '+9' : unreadCount}
-                </span>
-              )}
-            </button>
+            {/* 1. Notifications Bell Button (logged-in users only) */}
+            {currentUser && (
+              <button
+                onClick={() => setNotificationsOpen(true)}
+                className="relative p-2.5 rounded-xl bg-slate-100 hover:bg-emerald-50 text-slate-700 hover:text-emerald-900 border border-slate-200 transition-all shadow-2xs active:scale-95"
+                title="الإشعارات والتنبيهات المدرسية"
+              >
+                <Bell className="w-4 h-4 text-emerald-800" />
+                {unreadCount > 0 && (
+                  <span className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-rose-600 text-white rounded-full text-[10px] font-bold flex items-center justify-center shadow-xs">
+                    {unreadCount > 9 ? '+9' : unreadCount}
+                  </span>
+                )}
+              </button>
+            )}
 
             {/* 2. PWA Install App Button */}
             <button
