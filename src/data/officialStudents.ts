@@ -429,10 +429,89 @@ export const OFFICIAL_STUDENTS_LIST: OfficialStudentRosterItem[] = [
   { order: 31, identifier: '1001448010670000', regNumber: 392, surname: 'وزان', firstName: 'محمد رضا', gender: 'ذكر', birthDate: '2014-11-10', classId: '1AM-3', className: 'أولى متوسط 03' },
 ];
 
+// ================= نظام رموز التفعيل السرية المكونة من 6 أرقام للتلاميذ =================
+
+function computeSeedHash(seed: string): number {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x9e3779b9;
+  for (let i = 0; i < seed.length; i++) {
+    const ch = seed.charCodeAt(i);
+    h1 ^= ch;
+    h1 = Math.imul(h1, 0x01000193) >>> 0;
+    h2 = (Math.imul(h2 ^ (ch + i * 31), 0x85ebca6b) >>> 0);
+  }
+  return ((h1 ^ h2) >>> 0);
+}
+
+function isTrivialActivationCode(code: string): boolean {
+  // Reject all identical digits (e.g. 111111) or strictly sequential digits (e.g. 123456, 654321)
+  if (/^(\d)\1{5}$/.test(code)) return true;
+  if ('0123456789'.includes(code) || '9876543210'.includes(code)) return true;
+  // Reject repeating 2-digit pattern (e.g. 121212) or 3-digit repeat (e.g. 123123)
+  if (/^(\d\d)\1\1$/.test(code) || /^(\d\d\d)\1$/.test(code)) return true;
+  return false;
+}
+
+export function generateUniqueStudentActivationCode(
+  seedKey: string,
+  usedCodes: Iterable<string>
+): string {
+  const taken = usedCodes instanceof Set ? usedCodes : new Set(usedCodes);
+  const hash = computeSeedHash(`BEN_NAAMA_2025::${seedKey}`);
+  let offset = hash % 900000;
+
+  for (let attempt = 0; attempt < 900000; attempt++) {
+    const code = String(100000 + offset);
+    if (!taken.has(code) && !isTrivialActivationCode(code)) {
+      return code;
+    }
+    // 7919 is prime and coprime to 900000 -> visits every 6-digit code cleanly
+    offset = (offset + 7919) % 900000;
+  }
+
+  return String(100000 + (hash % 900000));
+}
+
+export interface OfficialStudentWithActivation extends OfficialStudentRosterItem {
+  activationCode: string;
+}
+
+const STUDENT_ACTIVATION_CODE_BY_ID = new Map<string, string>();
+const STUDENT_BY_ACTIVATION_CODE = new Map<string, OfficialStudentWithActivation>();
+
+export const OFFICIAL_STUDENT_ACTIVATION_LIST: OfficialStudentWithActivation[] = (() => {
+  const usedCodes = new Set<string>();
+  return OFFICIAL_STUDENTS_LIST.map(student => {
+    const activationCode = generateUniqueStudentActivationCode(
+      `${student.identifier}::${student.regNumber}::${student.classId}`,
+      usedCodes
+    );
+    usedCodes.add(activationCode);
+    const enriched: OfficialStudentWithActivation = {
+      ...student,
+      activationCode,
+    };
+    STUDENT_ACTIVATION_CODE_BY_ID.set(student.identifier, activationCode);
+    STUDENT_BY_ACTIVATION_CODE.set(activationCode, enriched);
+    return enriched;
+  });
+})();
+
+export function getStudentActivationCode(identifier: string): string | undefined {
+  return STUDENT_ACTIVATION_CODE_BY_ID.get(identifier.trim());
+}
+
+export function findOfficialStudentByActivationCode(
+  code: string
+): OfficialStudentWithActivation | undefined {
+  return STUDENT_BY_ACTIVATION_CODE.get(code.trim());
+}
+
 export function toUserProfile(item: OfficialStudentRosterItem): UserProfile {
   return {
     id: 'student-' + item.identifier,
     identifier: item.identifier,
+    activationCode: getStudentActivationCode(item.identifier),
     name: `${item.surname} ${item.firstName}`,
     role: 'student',
     classId: item.classId,
@@ -440,3 +519,4 @@ export function toUserProfile(item: OfficialStudentRosterItem): UserProfile {
     title: `تلميذ(ة) بقسم ${item.className}`,
   };
 }
+

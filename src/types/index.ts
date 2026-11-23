@@ -144,6 +144,7 @@ export interface UserProfile {
   name: string;
   role: UserRole;
   identifier: string; // رقم التعريف المدرسي أو المهني
+  activationCode?: string; // رمز التفعيل السري المكون من 6 أرقام للتلميذ
   pin?: string; // كلمة السر
   email?: string; // البريد الإلكتروني لاسترجاع الحساب
   classId?: string; // For students

@@ -22,7 +22,14 @@ import {
   UserRole,
   InternalStaffSummon,
 } from '../types';
-import { OFFICIAL_STUDENTS_LIST, toUserProfile } from '../data/officialStudents';
+import {
+  OFFICIAL_STUDENTS_LIST,
+  OFFICIAL_STUDENT_ACTIVATION_LIST,
+  findOfficialStudentByActivationCode,
+  generateUniqueStudentActivationCode,
+  getStudentActivationCode,
+  toUserProfile,
+} from '../data/officialStudents';
 import { OFFICIAL_STAFF_LIST, toStaffUserProfile } from '../data/officialStaff';
 import {
   approvePasswordResetRequestInFirestore,
@@ -62,6 +69,7 @@ export const STORAGE_KEYS = {
   SUMMONS: 'ben_naama_summons',
   INTERNAL_STAFF_SUMMONS: 'ben_naama_internal_staff_summons',
   USERS: 'ben_naama_users',
+  CUSTOM_STUDENTS: 'ben_naama_custom_students',
   STAFF_PINS: 'ben_naama_staff_pins',
   PEER_EXCHANGES: 'ben_naama_peer_exchanges',
   NOTIFICATIONS: 'ben_naama_notifications',
@@ -491,28 +499,54 @@ export function setCurrentUser(user: UserProfile | null): void {
   window.dispatchEvent(new Event('auth-change'));
 }
 
+export function getCustomStudents(): UserProfile[] {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.CUSTOM_STUDENTS);
+    if (!raw) return [];
+    const parsed: UserProfile[] = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.filter(u => u && u.role === 'student' && u.identifier) : [];
+  } catch {
+    return [];
+  }
+}
+
 export function getAllUsers(): UserProfile[] {
-  const applyPinOverrides = (list: UserProfile[]) =>
+  const applyOverrides = (list: UserProfile[]) =>
     list.map(u => {
-      if (u.role === 'student') return u;
+      if (u.role === 'student') {
+        const officialCode = getStudentActivationCode(u.identifier);
+        return officialCode && u.activationCode !== officialCode
+          ? { ...u, activationCode: officialCode }
+          : u;
+      }
       const effectivePin = getEffectiveStaffPin(u.identifier, u.pin);
       return effectivePin && effectivePin !== u.pin ? { ...u, pin: effectivePin } : u;
     });
 
+  const customStudents = getCustomStudents();
+
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.USERS);
-    if (!raw) return applyPinOverrides(MOCK_USERS);
+    if (!raw) {
+      const existingIds = new Set(MOCK_USERS.map(u => u.identifier));
+      const extraCustom = customStudents.filter(c => !existingIds.has(c.identifier));
+      return applyOverrides([...MOCK_USERS, ...extraCustom]);
+    }
     const parsed: UserProfile[] = JSON.parse(raw);
 
-    // Strictly retain ONLY official staff and official students of the school
+    // Strictly retain official staff, official students, and director-added custom students
     const officialStaffIds = new Set(OFFICIAL_STAFF_LIST.map(s => s.identifier));
     const officialStudentIds = new Set(OFFICIAL_STUDENTS_LIST.map(s => s.identifier));
+    const customStudentIds = new Set(customStudents.map(s => s.identifier));
 
-    const validUsers = parsed.filter(u =>
-      officialStaffIds.has(u.identifier) || officialStudentIds.has(u.identifier)
+    const validUsers = parsed.filter(
+      u =>
+        officialStaffIds.has(u.identifier) ||
+        officialStudentIds.has(u.identifier) ||
+        (u.role === 'student' && customStudentIds.has(u.identifier))
     );
 
-    // Sync official staff members with the latest rank, title, name, role
+    // Sync official staff members and student activation codes
     const staffMap = new Map(OFFICIAL_STAFF_LIST.map(s => [s.identifier, s]));
     const syncedUsers = validUsers.map(u => {
       const match = staffMap.get(u.identifier);
@@ -530,17 +564,139 @@ export function getAllUsers(): UserProfile[] {
           pin: effectivePin,
         };
       }
+      if (u.role === 'student') {
+        const officialCode = getStudentActivationCode(u.identifier);
+        if (officialCode && u.activationCode !== officialCode) {
+          return { ...u, activationCode: officialCode };
+        }
+      }
       return u;
     });
 
-    // Ensure all official users (staff + students) are present
+    // Ensure all official users (staff + students) + custom students are present
     const storedIds = new Set(syncedUsers.map(u => u.identifier));
-    const missing = applyPinOverrides(MOCK_USERS.filter(u => !storedIds.has(u.identifier)));
+    const missingOfficial = applyOverrides(MOCK_USERS.filter(u => !storedIds.has(u.identifier)));
+    const missingCustom = customStudents.filter(c => !storedIds.has(c.identifier));
 
-    return [...syncedUsers, ...missing];
+    return [...syncedUsers, ...missingOfficial, ...missingCustom];
   } catch {
-    return applyPinOverrides(MOCK_USERS);
+    return applyOverrides([...MOCK_USERS, ...customStudents]);
   }
+}
+
+export interface StudentActivationDirectoryEntry {
+  order: number;
+  regNumber: number;
+  identifier: string;
+  name: string;
+  surname: string;
+  firstName: string;
+  gender?: 'ذكر' | 'أنثى';
+  birthDate?: string;
+  classId: string;
+  className: string;
+  activationCode: string;
+  isCustom?: boolean;
+}
+
+export function getStudentActivationDirectory(): StudentActivationDirectoryEntry[] {
+  const officialEntries: StudentActivationDirectoryEntry[] = OFFICIAL_STUDENT_ACTIVATION_LIST.map(s => ({
+    order: s.order,
+    regNumber: s.regNumber,
+    identifier: s.identifier,
+    name: `${s.surname} ${s.firstName}`,
+    surname: s.surname,
+    firstName: s.firstName,
+    gender: s.gender,
+    birthDate: s.birthDate,
+    classId: s.classId,
+    className: s.className,
+    activationCode: s.activationCode,
+  }));
+
+  const officialIds = new Set(officialEntries.map(e => e.identifier));
+  const usedCodes = new Set(officialEntries.map(e => e.activationCode));
+  const customStudents = getCustomStudents().filter(c => !officialIds.has(c.identifier));
+
+  let nextReg = officialEntries.length + 1;
+  const customEntries: StudentActivationDirectoryEntry[] = customStudents.map((c, idx) => {
+    const code =
+      c.activationCode && /^\d{6}$/.test(c.activationCode) && !usedCodes.has(c.activationCode)
+        ? c.activationCode
+        : generateUniqueStudentActivationCode(`CUSTOM::${c.identifier}`, usedCodes);
+    usedCodes.add(code);
+    const parts = c.name.trim().split(/\s+/);
+    return {
+      order: idx + 1,
+      regNumber: nextReg++,
+      identifier: c.identifier,
+      name: c.name,
+      surname: parts[0] || c.name,
+      firstName: parts.slice(1).join(' ') || '',
+      classId: c.classId || '4AM-1',
+      className: c.className || 'رابعة متوسط 01',
+      activationCode: code,
+      isCustom: true,
+    };
+  });
+
+  return [...officialEntries, ...customEntries];
+}
+
+export function addCustomStudent(params: {
+  identifier: string;
+  name: string;
+  classId: string;
+  className: string;
+}): UserProfile {
+  const cleanId = normalizeIdentifier(params.identifier) || params.identifier.trim();
+  const officialMatch = OFFICIAL_STUDENTS_LIST.find(
+    s => normalizeIdentifier(s.identifier) === cleanId
+  );
+  if (officialMatch) {
+    return toUserProfile(officialMatch);
+  }
+
+  const usedCodes = new Set<string>(
+    OFFICIAL_STUDENT_ACTIVATION_LIST.map(s => s.activationCode)
+  );
+  const existingCustom = getCustomStudents();
+  for (const c of existingCustom) {
+    if (c.activationCode) usedCodes.add(c.activationCode);
+  }
+
+  const existingCustomRecord = existingCustom.find(
+    c => normalizeIdentifier(c.identifier) === cleanId
+  );
+  const activationCode =
+    existingCustomRecord?.activationCode && /^\d{6}$/.test(existingCustomRecord.activationCode)
+      ? existingCustomRecord.activationCode
+      : generateUniqueStudentActivationCode(`CUSTOM::${cleanId}::${params.classId}`, usedCodes);
+
+  const studentUser: UserProfile = {
+    id: 'student-' + cleanId,
+    identifier: params.identifier.trim(),
+    activationCode,
+    name: params.name.trim(),
+    role: 'student',
+    classId: params.classId,
+    className: params.className,
+    title: `تلميذ(ة) بقسم ${params.className}`,
+  };
+
+  const nextCustom = existingCustomRecord
+    ? existingCustom.map(c => (normalizeIdentifier(c.identifier) === cleanId ? studentUser : c))
+    : [...existingCustom, studentUser];
+  safeSetItem(STORAGE_KEYS.CUSTOM_STUDENTS, JSON.stringify(nextCustom));
+
+  const users = getAllUsers();
+  const existsInUsers = users.some(u => normalizeIdentifier(u.identifier) === cleanId);
+  const updatedUsers = existsInUsers
+    ? users.map(u => (normalizeIdentifier(u.identifier) === cleanId ? studentUser : u))
+    : [studentUser, ...users];
+  safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+  window.dispatchEvent(new Event('auth-change'));
+  return studentUser;
 }
 
 export function normalizeArabic(text: string): string {
@@ -557,7 +713,62 @@ export function normalizeArabic(text: string): string {
     .replace(/\s+/g, ' ');
 }
 
-// Strict dual authentication: Student MUST enter both 16-digit ID AND matching Surname & Name
+// Student authentication strictly via personal 6-digit activation code
+export function authenticateStudentByActivationCode(
+  rawCode: string
+): { success: boolean; user?: UserProfile; message?: string } {
+  const normalized = normalizeIdentifier(rawCode || '').replace(/[^0-9a-z]/g, '');
+
+  if (!normalized) {
+    return {
+      success: false,
+      message: '⛔ يرجى إدخال رمز التفعيل الشخصي المكون من 6 أرقام.',
+    };
+  }
+
+  if (!/^\d{6}$/.test(normalized)) {
+    return {
+      success: false,
+      message: '⛔ رمز التفعيل يجب أن يتكون من 6 أرقام بالضبط. يرجى التأكد من الرمز المسلم لك من طرف إدارة المؤسسة.',
+    };
+  }
+
+  // 1. Lookup in the 393 official students registry
+  const officialMatch = findOfficialStudentByActivationCode(normalized);
+  if (officialMatch) {
+    const user = toUserProfile(officialMatch);
+    registerNewUser(user);
+    setCurrentUser(user);
+    return { success: true, user };
+  }
+
+  // 2. Fallback: Lookup in custom-added students (if Director added a new student)
+  const directoryMatch = getStudentActivationDirectory().find(
+    s => s.activationCode === normalized
+  );
+  if (directoryMatch) {
+    const customUser: UserProfile = {
+      id: 'student-' + directoryMatch.identifier,
+      identifier: directoryMatch.identifier,
+      activationCode: directoryMatch.activationCode,
+      name: directoryMatch.name,
+      role: 'student',
+      classId: directoryMatch.classId,
+      className: directoryMatch.className,
+      title: `تلميذ(ة) بقسم ${directoryMatch.className}`,
+    };
+    registerNewUser(customUser);
+    setCurrentUser(customUser);
+    return { success: true, user: customUser };
+  }
+
+  return {
+    success: false,
+    message: `⛔ رمز التفعيل (${normalized}) غير صحيح أو غير مسجل في قائمة رموز تلاميذ متوسطة الشهيد بن نعمة مصطفى. يرجى التثبت من الرمز المسلم لك من الإدارة أو الناظرة.`,
+  };
+}
+
+// Legacy dual authentication kept exported for compatibility
 export function authenticateOfficialStudent(criteria: {
   identifier?: string;
   surname?: string;
@@ -572,7 +783,6 @@ export function authenticateOfficialStudent(criteria: {
     .trim();
   const normInput = normalizeArabic(rawInput);
 
-  // 1. Both 16-digit ID and Name are strictly required to prevent impersonation
   if (!cleanId) {
     return {
       success: false,
@@ -587,7 +797,6 @@ export function authenticateOfficialStudent(criteria: {
     };
   }
 
-  // 2. Find student by exact 16-digit Identifier in official roster or registered state
   const officialMatch = OFFICIAL_STUDENTS_LIST.find(s => s.identifier === cleanId);
   const registeredMatch = getAllUsers().find(u => u.role === 'student' && u.identifier === cleanId);
 
@@ -598,7 +807,6 @@ export function authenticateOfficialStudent(criteria: {
     };
   }
 
-  // 3. Verify that the entered Surname and First Name match this exact student
   const expectedSurname = officialMatch ? officialMatch.surname : (registeredMatch?.name.split(' ')[0] || '');
   const expectedFirstName = officialMatch ? officialMatch.firstName : (registeredMatch?.name.split(' ').slice(1).join(' ') || '');
   const expectedFullName = officialMatch ? `${officialMatch.surname} ${officialMatch.firstName}` : registeredMatch!.name;
@@ -610,16 +818,10 @@ export function authenticateOfficialStudent(criteria: {
   const normEnteredSurname = normalizeArabic(criteria.surname || '');
   const normEnteredFirst = normalizeArabic(criteria.firstName || '');
 
-  // Matching check:
-  // - Direct full name match (or spaces ignored)
   const isFullMatch = normInput === normExpectedFull || normInput.replace(/\s/g, '') === normExpectedFull.replace(/\s/g, '');
-  
-  // - Field-by-field match (even if order of names is swapped)
   const isFieldMatch =
     (normEnteredSurname === normExpectedSurname && normEnteredFirst === normExpectedFirst) ||
     (normEnteredSurname === normExpectedFirst && normEnteredFirst === normExpectedSurname);
-
-  // - Substring token containment
   const inputTokens = normInput.split(' ').filter(t => t.length > 0);
   const expectedTokens = normExpectedFull.split(' ').filter(t => t.length > 0);
   const isTokenMatch =
@@ -635,7 +837,6 @@ export function authenticateOfficialStudent(criteria: {
     };
   }
 
-  // Verification passed - login student
   const user = officialMatch ? toUserProfile(officialMatch) : registeredMatch!;
   registerNewUser(user);
   setCurrentUser(user);
@@ -2696,17 +2897,19 @@ export function getClassmatesForStudent(classId: string, currentStudentId: strin
   const allUsers = getAllUsers();
   const userMap = new Map<string, UserProfile>();
 
-  // 1. All registered / edited students in state
+  // 1. All registered / edited students in state (strip private activation codes)
   for (const u of allUsers) {
     if (u.role === 'student' && u.classId === classId && u.identifier !== currentStudentId) {
-      userMap.set(u.identifier, u);
+      const { activationCode: _omitCode, ...safeProfile } = u;
+      userMap.set(u.identifier, safeProfile);
     }
   }
 
-  // 2. Official students from ministry list for this class
+  // 2. Official students from ministry list for this class (strip private activation codes)
   for (const s of OFFICIAL_STUDENTS_LIST) {
     if (s.classId === classId && s.identifier !== currentStudentId && !userMap.has(s.identifier)) {
-      userMap.set(s.identifier, toUserProfile(s));
+      const { activationCode: _omitCode, ...safeProfile } = toUserProfile(s);
+      userMap.set(s.identifier, safeProfile);
     }
   }
 

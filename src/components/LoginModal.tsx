@@ -16,10 +16,10 @@ import {
   UserCheck,
   X,
 } from 'lucide-react';
-import { SCHOOL_CLASSES, SCHOOL_NAME } from '../data/mockData';
+import { SCHOOL_NAME } from '../data/mockData';
 import { OFFICIAL_STAFF_LIST } from '../data/officialStaff';
 import {
-  authenticateOfficialStudent,
+  authenticateStudentByActivationCode,
   authenticateUserAsync,
   normalizeIdentifier,
   submitPasswordResetRequest,
@@ -35,11 +35,8 @@ interface LoginModalProps {
 export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLoginSuccess }) => {
   const [activeCategory, setActiveCategory] = useState<'student' | 'staff'>('student');
 
-  // Student Form Fields
-  const [studentSurname, setStudentSurname] = useState('');
-  const [studentFirstName, setStudentFirstName] = useState('');
-  const [studentClassId, setStudentClassId] = useState('4AM-1');
-  const [studentId, setStudentId] = useState('');
+  // Student Form Field (Single 6-digit Activation Code)
+  const [studentActivationCode, setStudentActivationCode] = useState('');
 
   // Staff Form Fields: الرقم المهني + كلمة السر
   const [staffId, setStaffId] = useState('');
@@ -61,44 +58,35 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
 
   if (!isOpen) return null;
 
-  // Student Login Submit Handler - Strictly enforces 16-digit ID + matching Name
+  // Student Login Submit Handler - Authenticates strictly with personal 6-digit activation code
+  const handleStudentCodeChange = (raw: string) => {
+    const digitsOnly = normalizeIdentifier(raw).replace(/\D/g, '').slice(0, 6);
+    setStudentActivationCode(digitsOnly);
+    if (error) setError(null);
+  };
+
   const handleStudentSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
-    const cleanSurname = studentSurname.trim();
-    const cleanFirstName = studentFirstName.trim();
-    const cleanStudentId = studentId.trim().replace(/\s+/g, '');
-
-    // Strictly enforce both credentials
-    if (!cleanStudentId) {
-      setError('يرجى إدخال رقم التعريف المدرسي المكون من 16 رقماً الخاص بك.');
-      return;
-    }
-
-    if (!cleanSurname || !cleanFirstName) {
-      setError('يرجى إدخال اللقب والاسم معاً لتأكيد هويتك ومنع دخول أي تلميذ آخر في حسابك.');
+    const cleanCode = normalizeIdentifier(studentActivationCode).replace(/\D/g, '');
+    if (cleanCode.length !== 6) {
+      setError('يرجى إدخال رمز التفعيل الشخصي المكون من 6 أرقام كاملة.');
       return;
     }
 
     setLoading(true);
     setTimeout(() => {
-      const res = authenticateOfficialStudent({
-        identifier: cleanStudentId,
-        surname: cleanSurname,
-        firstName: cleanFirstName,
-        classId: studentClassId,
-      });
-
+      const res = authenticateStudentByActivationCode(cleanCode);
       setLoading(false);
 
       if (res.success && res.user) {
         onLoginSuccess(res.user);
         onClose();
       } else {
-        setError(res.message || 'بيانات الدخول غير صحيحة أو غير متطابقة مع سجلات المؤسسة.');
+        setError(res.message || 'رمز التفعيل المدخل غير صحيح أو غير مسجل في سجلات المؤسسة.');
       }
-    }, 250);
+    }, 200);
   };
 
   // Staff Login Submit Handler - Strictly allows only registered official staff (with live cloud sync check)
@@ -310,111 +298,80 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
           )}
 
           {activeCategory === 'student' ? (
-            /* Student Entrance */
+            /* Student Entrance - Single 6-digit Activation Code */
             <div className="space-y-4">
-              <div className="bg-emerald-50/90 border border-emerald-200 p-3.5 rounded-2xl text-xs text-emerald-950 leading-relaxed shadow-xs">
-                <span className="font-bold flex items-center gap-1.5 mb-1 text-emerald-900">
-                  <Shield className="w-4 h-4 text-emerald-700" />
-                  <span>دخول آمن ومحمي لتلاميذ المؤسسة (الرقم المدرسي + اللقب والاسم):</span>
+              <div className="bg-emerald-50/90 border border-emerald-200 p-4 rounded-2xl text-xs text-emerald-950 leading-relaxed shadow-xs">
+                <span className="font-black flex items-center gap-1.5 mb-1.5 text-emerald-900 text-sm">
+                  <KeyRound className="w-4 h-4 text-emerald-700" />
+                  <span>الدخول السريع والآمن برمز التفعيل (6 أرقام فقط):</span>
                 </span>
-                لحماية حسابك ومنع أي تلميذ آخر من الدخول في حسابك، يُشترط النظام إدخال <strong>رقم تعريفك المدرسي (16 رقماً)</strong> مع <strong>اللقب والاسم</strong> وتطابقهما معاً كما في الشهادة المدرسية أو كشف النقاط.
+                يتم الدخول مباشرة إلى فضاء التلميذ عبر إدخال <strong>رمز التفعيل السري الخاص بك المكون من 6 أرقام</strong> الذي يُسلّم لك من طرف إدارة المؤسسة (السيد المدير أو السيدة الناظرة). حافظ على سرية رمزك ولا تشاركه مع زملائك.
               </div>
 
-              <form onSubmit={handleStudentSubmit} className="space-y-3.5">
-                {/* 1. School ID (16 digits) */}
+              <form onSubmit={handleStudentSubmit} className="space-y-4">
                 <div>
-                  <div className="flex items-center justify-between mb-1">
-                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="text-xs font-black text-slate-900">
-                      رقم التعريف المدرسي (16 رقماً): <span className="text-red-600 font-black">* إلزامي</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="text-xs sm:text-sm font-black text-slate-900">
+                      رمز التفعيل الشخصي (6 أرقام): <span className="text-red-600 font-black">* إلزامي</span>
                     </label>
-                    <span className="text-[10px] text-emerald-800 font-bold bg-emerald-100/90 px-2 py-0.5 rounded-full border border-emerald-400">
-                      من الشهادة أو كشف النقاط
+                    <span
+                      className={`text-[11px] font-black px-2.5 py-0.5 rounded-full border ${
+                        studentActivationCode.length === 6
+                          ? 'bg-emerald-100 text-emerald-900 border-emerald-400'
+                          : 'bg-slate-100 text-slate-700 border-slate-300'
+                      }`}
+                    >
+                      {studentActivationCode.length} / 6 أرقام
                     </span>
                   </div>
+
                   <div className="relative">
                     <input
                       type="text"
+                      inputMode="numeric"
+                      autoComplete="one-time-code"
                       required
-                      placeholder="أدخل رقمك المدرسي المكون من 16 رقماً"
-                      value={studentId}
-                      onChange={e => setStudentId(e.target.value)}
-                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                      className="w-full pl-4 pr-10 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none font-mono bg-white"
+                      maxLength={6}
+                      placeholder="• • • • • •"
+                      value={studentActivationCode}
+                      onChange={e => handleStudentCodeChange(e.target.value)}
+                      style={{ backgroundColor: '#ffffff', color: '#064e3b' }}
+                      className="w-full px-5 py-4 rounded-2xl border-2 border-emerald-300 focus:border-emerald-700 focus:ring-4 focus:ring-emerald-500/20 text-center text-2xl sm:text-3xl tracking-[0.45em] font-black font-mono outline-none bg-white shadow-inner placeholder:text-slate-300 placeholder:tracking-[0.35em]"
                       dir="ltr"
                     />
-                    <UserCheck className="w-4 h-4 text-emerald-700 absolute right-3 top-3.5" />
-                  </div>
-                  <span style={{ color: '#475569' }} className="text-[10px] text-slate-600 font-medium mt-1 block">
-                    يضمن عدم تمكن أي زميل آخر من الدخول إلى حسابك.
-                  </span>
-                </div>
-
-                {/* 2. Class Selection */}
-                <div>
-                  <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1">
-                    القسم الدراسي:
-                  </label>
-                  <select
-                    value={studentClassId}
-                    onChange={e => setStudentClassId(e.target.value)}
-                    style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                    className="w-full px-4 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 text-sm outline-none bg-white font-bold"
-                  >
-                    {SCHOOL_CLASSES.map(cls => (
-                      <option key={cls.id} value={cls.id}>
-                        {cls.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                {/* 3. Surname and First Name in 2 inputs */}
-                <div className="grid grid-cols-2 gap-3">
-                  <div>
-                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1">
-                      اللقب: <span className="text-red-600 font-black">* إلزامي</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="لقب التلميذ(ة)"
-                      value={studentSurname}
-                      onChange={e => setStudentSurname(e.target.value)}
-                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                      className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none bg-white"
-                    />
                   </div>
 
-                  <div>
-                    <label style={{ color: '#0f172a', fontWeight: 900 }} className="block text-xs font-black text-slate-900 mb-1">
-                      الاسم: <span className="text-red-600 font-black">* إلزامي</span>
-                    </label>
-                    <input
-                      type="text"
-                      required
-                      placeholder="اسم التلميذ(ة)"
-                      value={studentFirstName}
-                      onChange={e => setStudentFirstName(e.target.value)}
-                      style={{ backgroundColor: '#ffffff', color: '#0f172a' }}
-                      className="w-full px-3.5 py-2.5 rounded-xl border-2 border-slate-300 focus:border-emerald-600 focus:ring-2 focus:ring-emerald-500/20 text-slate-900 font-bold text-sm outline-none bg-white"
-                    />
+                  <div className="flex items-center justify-between text-[11px] text-slate-600 font-medium mt-2 px-1">
+                    <span className="flex items-center gap-1">
+                      <Shield className="w-3.5 h-3.5 text-emerald-700" />
+                      <span>يتعرف النظام تلقائياً على اسمك وقسمك فور إدخال الرمز</span>
+                    </span>
+                    {studentActivationCode.length > 0 && (
+                      <button
+                        type="button"
+                        onClick={() => setStudentActivationCode('')}
+                        className="text-rose-600 hover:underline font-bold cursor-pointer"
+                      >
+                        مسح الرمز
+                      </button>
+                    )}
                   </div>
                 </div>
 
                 <button
                   type="submit"
-                  disabled={loading}
+                  disabled={loading || studentActivationCode.length !== 6}
                   style={{
                     backgroundColor: '#064e3b',
                     color: '#fef08a',
                     borderColor: '#10b981',
                   }}
-                  className="w-full py-4 px-5 rounded-2xl bg-emerald-900 hover:bg-emerald-950 active:scale-98 text-yellow-300 font-extrabold text-base sm:text-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-3 mt-3 cursor-pointer border-2 border-emerald-500"
+                  className="w-full py-4 px-5 rounded-2xl bg-emerald-900 hover:bg-emerald-950 disabled:opacity-60 active:scale-98 text-yellow-300 font-extrabold text-base sm:text-lg shadow-lg hover:shadow-xl transition-all flex items-center justify-center gap-3 mt-2 cursor-pointer border-2 border-emerald-500"
                 >
                   {loading ? (
                     <>
                       <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full animate-spin" />
-                      <span style={{ color: '#fef08a', fontWeight: 900 }}>جارٍ التحقق والدخول إلى الفضاء...</span>
+                      <span style={{ color: '#fef08a', fontWeight: 900 }}>جارٍ التحقق من رمز التفعيل والدخول...</span>
                     </>
                   ) : (
                     <>
@@ -430,7 +387,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                         }}
                         className="text-yellow-200 font-black tracking-wide"
                       >
-                        دخول فضاء التلميذ الآن
+                        دخول فضاء التلميذ برمز التفعيل
                       </span>
                       <ArrowRight className="w-5 h-5 text-yellow-300 rtl:rotate-180 stroke-[2.5]" />
                     </>

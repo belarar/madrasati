@@ -30,12 +30,12 @@ import {
 } from 'lucide-react';
 import { MOCK_USERS, SCHOOL_CLASSES, SCHOOL_NAME, SUBJECTS } from '../../data/mockData';
 import {
+  addCustomStudent,
   deleteAnnouncement,
   deleteDocument,
   getAllUsers,
   getPendingResetRequestsCount,
   fetchPasswordResetRequestsFromServer,
-  registerNewUser,
   saveAnnouncement,
   saveDocument,
   syncWithServer,
@@ -58,6 +58,7 @@ import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { DatabaseDebugView } from './DatabaseDebugView';
 import { StudentChatSupervisionPanel } from '../common/StudentChatSupervisionPanel';
 import { StaffAccountsManager } from './StaffAccountsManager';
+import { StudentActivationCodesManager } from './StudentActivationCodesManager';
 import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface DirectorViewProps {
@@ -75,9 +76,10 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   summons,
   onRefreshData,
 }) => {
-  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'staff-accounts' | 'roster' | 'chat-supervision'>('announcements');
+  const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'staff-accounts' | 'student-codes' | 'roster' | 'chat-supervision'>('announcements');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [showDebugModal, setShowDebugModal] = useState(false);
+  const [studentRefreshSignal, setStudentRefreshSignal] = useState(0);
 
   // New Announcement Form State
   const [annTitle, setAnnTitle] = useState('');
@@ -347,26 +349,25 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     if (!newStudentId.trim() || !newStudentName.trim()) return;
 
     const selectedCls = SCHOOL_CLASSES.find(c => c.id === newStudentClass);
-    const newStudent: UserProfile = {
-      id: 'student-' + newStudentId.trim(),
+    const createdStudent = addCustomStudent({
       identifier: newStudentId.trim(),
       name: newStudentName.trim(),
-      role: 'student',
       classId: newStudentClass,
-      className: selectedCls?.name || '4 متوسط 1',
-      title: 'تلميذ مقيد بقوائم المؤسسة',
-    };
+      className: selectedCls?.name || 'رابعة متوسط 01',
+    });
 
-    registerNewUser(newStudent);
-    setStudentAddedSuccess(`تمت إضافة التلميذ(ة) "${newStudentName}" بالرقم المدرسي (${newStudentId}) بنجاح!`);
+    setStudentAddedSuccess(
+      `تمت إضافة التلميذ(ة) "${newStudentName}" بنجاح! رمز التفعيل (6 أرقام): ${createdStudent.activationCode}`
+    );
     setNewStudentId('');
     setNewStudentName('');
+    setStudentRefreshSignal(s => s + 1);
     onRefreshData();
 
     setTimeout(() => {
       setStudentAddedSuccess(null);
       setShowAddStudentModal(false);
-    }, 1600);
+    }, 2800);
   };
 
   const totalDownloads = documents.reduce((acc, d) => acc + (d.downloadCount || 0), 0);
@@ -376,13 +377,18 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   const filteredStudents = registeredStudents.filter(s => {
     if (!studentSearch.trim()) return true;
     const q = studentSearch.toLowerCase();
-    return s.name.toLowerCase().includes(q) || s.identifier.toLowerCase().includes(q) || (s.className && s.className.toLowerCase().includes(q));
+    return (
+      s.name.toLowerCase().includes(q) ||
+      s.identifier.toLowerCase().includes(q) ||
+      (s.activationCode && s.activationCode.includes(q)) ||
+      (s.className && s.className.toLowerCase().includes(q))
+    );
   });
 
   return (
     <div className="space-y-6">
       {/* Director Executive Banner */}
-      <div className="rounded-3xl bg-gradient-to-r from-slate-900 via-emerald-950 to-teal-950 text-white p-6 sm:p-8 shadow-md relative overflow-hidden">
+      <div className="print:hidden rounded-3xl bg-gradient-to-r from-slate-900 via-emerald-950 to-teal-950 text-white p-6 sm:p-8 shadow-md relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs text-xs font-semibold text-emerald-200 border border-white/15">
@@ -460,7 +466,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       )}
 
       {/* Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
+      <div className="print:hidden flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <button
             onClick={() => setActiveTab('announcements')}
@@ -530,6 +536,21 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 لوحة التحكم
               </span>
             )}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('student-codes')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'student-codes'
+                ? 'bg-emerald-800 text-white shadow-md ring-2 ring-emerald-500/40'
+                : 'bg-amber-50 text-amber-950 border border-amber-300 hover:bg-amber-100'
+            }`}
+          >
+            <KeyRound className={`w-4 h-4 ${activeTab === 'student-codes' ? 'text-yellow-300' : 'text-amber-700'}`} />
+            <span>رموز تفعيل التلاميذ (6 أرقام)</span>
+            <span className="text-[10px] bg-emerald-700 text-white font-black px-2 py-0.5 rounded-full">
+              {registeredStudents.length}
+            </span>
           </button>
 
           <button
@@ -1343,28 +1364,36 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
               <div>
                 <h3 className="font-bold text-slate-900 text-base flex items-center gap-2">
                   <GraduationCap className="w-5 h-5 text-emerald-700" />
-                  <span>قوائم التلاميذ وأرقامهم المدرسية المعتمدة ({registeredStudents.length})</span>
+                  <span>قوائم التلاميذ ورموز تفعيلهم المعتمدة ({registeredStudents.length})</span>
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  أرقام التعريف المدرسية المسجلة من واقع ملفات المؤسسة (يدخل بها التلميذ مباشرة).
+                  لكل تلميذ رمز تفعيل سري مكون من 6 أرقام للدخول إلى فضائه. يمكنك طباعة القائمة كاملة أو تصديرها من تبويب "رموز تفعيل التلاميذ".
                 </p>
               </div>
 
-              <div className="flex items-center gap-2">
+              <div className="flex flex-wrap items-center gap-2">
                 <input
                   type="text"
                   value={studentSearch}
                   onChange={e => setStudentSearch(e.target.value)}
-                  placeholder="بحث برقم التعريف أو الاسم..."
+                  placeholder="بحث بالاسم، رمز التفعيل، أو الرقم..."
                   className="px-3 py-1.5 rounded-xl border border-slate-300 text-xs outline-none focus:border-emerald-600"
                 />
                 <button
                   type="button"
+                  onClick={() => setActiveTab('student-codes')}
+                  className="px-3.5 py-1.5 rounded-xl bg-amber-100 hover:bg-amber-200 text-amber-950 border border-amber-300 font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer"
+                >
+                  <KeyRound className="w-3.5 h-3.5 text-amber-800" />
+                  <span>جدول الرموز والطباعة</span>
+                </button>
+                <button
+                  type="button"
                   onClick={() => setShowAddStudentModal(true)}
-                  className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs"
+                  className="px-3.5 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs flex items-center gap-1.5 shadow-2xs cursor-pointer"
                 >
                   <Plus className="w-4 h-4" />
-                  <span>إضافة رقم تلميذ</span>
+                  <span>إضافة تلميذ</span>
                 </button>
               </div>
             </div>
@@ -1373,15 +1402,24 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
               {filteredStudents.map(student => (
                 <div
                   key={student.id}
-                  className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-400 transition-all flex items-center justify-between text-xs"
+                  className="p-3.5 rounded-2xl border border-slate-200 bg-slate-50/50 hover:bg-white hover:border-emerald-400 transition-all flex items-center justify-between gap-2 text-xs"
                 >
-                  <div>
-                    <span className="font-bold text-slate-900 block">{student.name}</span>
+                  <div className="min-w-0">
+                    <span className="font-bold text-slate-900 block truncate">{student.name}</span>
                     <span className="text-[11px] text-emerald-800 font-semibold block">{student.className}</span>
+                    <span className="text-[10px] font-mono text-slate-400 block" dir="ltr">
+                      {student.identifier}
+                    </span>
                   </div>
-                  <span className="font-mono bg-white border border-slate-200 px-2 py-1 rounded-lg text-slate-700 font-bold" dir="ltr">
-                    {student.identifier}
-                  </span>
+                  <div className="text-center shrink-0">
+                    <span className="text-[9px] text-emerald-700 font-bold block mb-0.5">رمز التفعيل</span>
+                    <span
+                      className="font-mono bg-emerald-100 border border-emerald-300 px-2.5 py-1 rounded-lg text-emerald-950 font-black tracking-wider block"
+                      dir="ltr"
+                    >
+                      {student.activationCode || '------'}
+                    </span>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1500,6 +1538,14 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             </form>
           </div>
         </div>
+      )}
+
+      {/* Tab: Student Activation Codes Directory */}
+      {activeTab === 'student-codes' && (
+        <StudentActivationCodesManager
+          onOpenAddStudent={() => setShowAddStudentModal(true)}
+          refreshSignal={studentRefreshSignal}
+        />
       )}
 
       {/* Tab: Student Chat Supervision */}

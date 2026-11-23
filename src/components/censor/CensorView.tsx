@@ -11,6 +11,7 @@ import {
   FileCheck,
   FileText,
   Filter,
+  KeyRound,
   Megaphone,
   MessageCircle,
   Paperclip,
@@ -57,6 +58,7 @@ import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { SummonModal } from '../common/SummonModal';
 import { StudentChatSupervisionPanel } from '../common/StudentChatSupervisionPanel';
+import { StudentActivationCodesManager } from '../director/StudentActivationCodesManager';
 import { processAndCompressFile } from '../../utils/fileCompressor';
 
 interface CensorViewProps {
@@ -73,7 +75,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
   onRefreshData,
 }) => {
   const [activeTab, setActiveTab] = useState<
-    'supervisors' | 'new-supervisor-summon' | 'summons' | 'new-summon' | 'announcements' | 'new-announcement' | 'chat-supervision'
+    'supervisors' | 'new-supervisor-summon' | 'summons' | 'new-summon' | 'announcements' | 'new-announcement' | 'student-codes' | 'chat-supervision'
   >('supervisors');
   const [selectedSummonModal, setSelectedSummonModal] = useState<ParentSummon | null>(null);
 
@@ -296,7 +298,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
   return (
     <div className="space-y-6">
       {/* Banner */}
-      <div className="rounded-3xl bg-gradient-to-r from-teal-900 via-emerald-900 to-slate-900 text-white p-6 sm:p-8 shadow-md relative overflow-hidden">
+      <div className="print:hidden rounded-3xl bg-gradient-to-r from-teal-900 via-emerald-900 to-slate-900 text-white p-6 sm:p-8 shadow-md relative overflow-hidden">
         <div className="relative z-10 flex flex-col md:flex-row md:items-center justify-between gap-6">
           <div className="space-y-2">
             <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/10 backdrop-blur-xs text-xs font-semibold text-emerald-200 border border-white/15">
@@ -336,7 +338,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
       </div>
 
       {/* Tabs */}
-      <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
+      <div className="print:hidden flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
         <div className="flex items-center gap-2 overflow-x-auto pb-1">
           <button
             onClick={() => setActiveTab('supervisors')}
@@ -396,6 +398,18 @@ export const CensorView: React.FC<CensorViewProps> = ({
           >
             <Bell className="w-4 h-4" />
             <span>إعلانات التلاميذ ({censorAnnouncements.length})</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('student-codes')}
+            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+              activeTab === 'student-codes'
+                ? 'bg-emerald-800 text-white shadow-md ring-2 ring-emerald-500/40'
+                : 'bg-amber-50 text-amber-950 border border-amber-300 hover:bg-amber-100'
+            }`}
+          >
+            <KeyRound className={`w-4 h-4 ${activeTab === 'student-codes' ? 'text-yellow-300' : 'text-amber-700'}`} />
+            <span>رموز تفعيل التلاميذ (6 أرقام)</span>
           </button>
 
           <button
@@ -1418,6 +1432,11 @@ export const CensorView: React.FC<CensorViewProps> = ({
             </button>
           </form>
         </div>
+      )}
+
+      {/* Tab: Student Activation Codes Directory */}
+      {activeTab === 'student-codes' && (
+        <StudentActivationCodesManager />
       )}
 
       {/* Tab: Student Chat Supervision */}
