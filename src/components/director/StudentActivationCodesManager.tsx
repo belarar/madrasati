@@ -6,6 +6,7 @@ import {
   Eye,
   EyeOff,
   FileSpreadsheet,
+  FileText,
   Globe,
   GraduationCap,
   KeyRound,
@@ -44,6 +45,7 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
   const [showSchoolIds, setShowSchoolIds] = useState(true);
   const [copiedId, setCopiedId] = useState<string | null>(null);
   const [bulkCopied, setBulkCopied] = useState(false);
+  const [slipsDownloaded, setSlipsDownloaded] = useState<'html' | 'doc' | null>(null);
 
   const defaultSiteUrl = typeof window !== 'undefined' ? window.location.origin : '';
   const [siteUrl, setSiteUrl] = useState<string>(() => {
@@ -186,6 +188,284 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
     window.print();
   };
 
+  const escapeHtml = (value: string | number | undefined): string =>
+    String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+
+  const triggerBlobDownload = (content: string, mimeType: string, fileName: string) => {
+    const blob = new Blob([content], { type: mimeType });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = fileName;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const handleDownloadAllSlipsHtml = () => {
+    if (filteredStudents.length === 0) return;
+    const cleanSiteUrl = (siteUrl.trim() || defaultSiteUrl || '').trim();
+    const fileSlug = selectedClassId === 'ALL' ? 'جميع_الأقسام' : selectedClassId;
+
+    const slipsMarkup = filteredStudents
+      .map(
+        (s, idx) => `
+      <div class="slip">
+        <div class="slip-header">
+          <div class="school-name">${escapeHtml(SCHOOL_NAME)}</div>
+          <div class="student-name">${escapeHtml(s.name)}</div>
+          <div class="student-meta">القسم: <strong>${escapeHtml(s.className)}</strong> • رقم ${idx + 1}</div>
+        </div>
+        <div class="code-box">
+          <div class="code-label">رمز التفعيل الشخصي للدخول إلى المنصة:</div>
+          <div class="code-value" dir="ltr">${escapeHtml(s.activationCode)}</div>
+        </div>
+        ${
+          cleanSiteUrl
+            ? `<div class="url-box">
+                <div class="url-label">رابط الدخول إلى المنصة:</div>
+                <div class="url-value" dir="ltr">${escapeHtml(cleanSiteUrl)}</div>
+                <div class="hint">افتح الرابط ← اختر «فضاء التلاميذ» ← أدخل رمز التفعيل أعلاه</div>
+              </div>`
+            : ''
+        }
+        <div class="slip-footer">
+          <span>سري وشخصي للتلميذ(ة)</span>
+          ${showSchoolIds ? `<span dir="ltr" class="mono">${escapeHtml(s.identifier)}</span>` : ''}
+        </div>
+      </div>`
+      )
+      .join('\n');
+
+    const htmlDoc = `<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <title>قصاصات رموز تفعيل التلاميذ - ${escapeHtml(selectedClassName)}</title>
+  <style>
+    @page { size: A4; margin: 10mm; }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Cairo', 'Tajawal', 'Segoe UI', Tahoma, Arial, sans-serif;
+      background: #f8fafc;
+      color: #0f172a;
+      margin: 0;
+      padding: 16px;
+      direction: rtl;
+    }
+    .toolbar {
+      max-width: 900px;
+      margin: 0 auto 14px;
+      background: #064e3b;
+      color: #fff;
+      padding: 12px 16px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .toolbar button {
+      background: #fef08a;
+      color: #064e3b;
+      border: none;
+      padding: 8px 16px;
+      border-radius: 8px;
+      font-weight: 800;
+      font-size: 13px;
+      cursor: pointer;
+    }
+    .doc-header {
+      max-width: 900px;
+      margin: 0 auto 14px;
+      text-align: center;
+      border-bottom: 2px solid #334155;
+      padding-bottom: 10px;
+    }
+    .doc-header h1 { margin: 4px 0; font-size: 18px; }
+    .doc-header p { margin: 2px 0; font-size: 12px; color: #334155; }
+    .grid {
+      max-width: 900px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 10px;
+    }
+    .slip {
+      background: #ffffff;
+      border: 1.5px dashed #64748b;
+      border-radius: 12px;
+      padding: 11px 12px;
+      break-inside: avoid;
+      page-break-inside: avoid;
+      display: flex;
+      flex-direction: column;
+      gap: 7px;
+    }
+    .slip-header { border-bottom: 1px solid #e2e8f0; padding-bottom: 6px; }
+    .school-name { font-size: 10px; font-weight: 800; color: #065f46; }
+    .student-name { font-size: 14px; font-weight: 900; color: #0f172a; margin-top: 2px; }
+    .student-meta { font-size: 11px; color: #475569; margin-top: 1px; }
+    .code-box {
+      background: #ecfdf5;
+      border: 1px solid #a7f3d0;
+      border-radius: 8px;
+      padding: 6px;
+      text-align: center;
+    }
+    .code-label { font-size: 10px; font-weight: 700; color: #064e3b; }
+    .code-value {
+      font-family: 'Courier New', monospace;
+      font-size: 22px;
+      font-weight: 900;
+      letter-spacing: 6px;
+      color: #022c22;
+      margin-top: 2px;
+    }
+    .url-box {
+      background: #f8fafc;
+      border: 1px solid #cbd5e1;
+      border-radius: 8px;
+      padding: 6px 8px;
+    }
+    .url-label { font-size: 10px; font-weight: 700; color: #334155; }
+    .url-value {
+      font-family: 'Courier New', monospace;
+      font-size: 10px;
+      font-weight: 700;
+      color: #064e3b;
+      word-break: break-all;
+      margin-top: 2px;
+    }
+    .hint { font-size: 9px; color: #64748b; margin-top: 2px; }
+    .slip-footer {
+      display: flex;
+      justify-content: space-between;
+      font-size: 9.5px;
+      color: #64748b;
+    }
+    .mono { font-family: 'Courier New', monospace; }
+    @media print {
+      body { background: #fff; padding: 0; }
+      .toolbar { display: none; }
+      .grid { max-width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  <div class="toolbar">
+    <div>
+      <strong>${escapeHtml(SCHOOL_NAME)}</strong> — قصاصات التوزيع (${escapeHtml(selectedClassName)} • ${filteredStudents.length} قصاصة)
+    </div>
+    <button onclick="window.print()">طباعة القصاصات أو حفظها PDF</button>
+  </div>
+  <div class="doc-header">
+    <p>الجمهورية الجزائرية الديمقراطية الشعبية • وزارة التربية الوطنية</p>
+    <h1>${escapeHtml(SCHOOL_NAME)} — قصاصات رموز تفعيل التلاميذ</h1>
+    <p>القسم: ${escapeHtml(selectedClassName)} • العدد الإجمالي: ${filteredStudents.length} تلميذ(ة)</p>
+  </div>
+  <div class="grid">
+    ${slipsMarkup}
+  </div>
+</body>
+</html>`;
+
+    triggerBlobDownload(
+      '\uFEFF' + htmlDoc,
+      'text/html;charset=utf-8;',
+      `قصاصات_التلاميذ_${fileSlug}.html`
+    );
+    setSlipsDownloaded('html');
+    setTimeout(() => setSlipsDownloaded(prev => (prev === 'html' ? null : prev)), 2500);
+  };
+
+  const handleDownloadAllSlipsWord = () => {
+    if (filteredStudents.length === 0) return;
+    const cleanSiteUrl = (siteUrl.trim() || defaultSiteUrl || '').trim();
+    const fileSlug = selectedClassId === 'ALL' ? 'جميع_الأقسام' : selectedClassId;
+
+    const rows: string[] = [];
+    for (let i = 0; i < filteredStudents.length; i += 2) {
+      const pair = [filteredStudents[i], filteredStudents[i + 1]];
+      const cells = pair
+        .map((s, offset) => {
+          if (!s) return '<td style="width:50%; padding:6px;"></td>';
+          const num = i + offset + 1;
+          return `<td style="width:50%; vertical-align:top; padding:6px;">
+            <div style="border:1.5pt dashed #64748b; padding:10px; background:#ffffff; page-break-inside:avoid;">
+              <div style="font-size:9pt; font-weight:bold; color:#065f46;">${escapeHtml(SCHOOL_NAME)}</div>
+              <div style="font-size:12pt; font-weight:bold; color:#0f172a; margin-top:3px;">${escapeHtml(s.name)}</div>
+              <div style="font-size:9.5pt; color:#475569; border-bottom:1px solid #e2e8f0; padding-bottom:5px; margin-bottom:6px;">
+                القسم: <strong>${escapeHtml(s.className)}</strong> • رقم ${num}
+              </div>
+              <div style="background:#ecfdf5; border:1px solid #6ee7b7; padding:6px; text-align:center; margin-bottom:6px;">
+                <div style="font-size:8.5pt; font-weight:bold; color:#064e3b;">رمز التفعيل الشخصي للدخول إلى المنصة:</div>
+                <div dir="ltr" style="font-family:'Courier New',monospace; font-size:18pt; font-weight:bold; letter-spacing:4px; color:#022c22; margin-top:2px;">
+                  ${escapeHtml(s.activationCode)}
+                </div>
+              </div>
+              ${
+                cleanSiteUrl
+                  ? `<div style="background:#f8fafc; border:1px solid #cbd5e1; padding:5px 6px; margin-bottom:5px;">
+                      <div style="font-size:8.5pt; font-weight:bold; color:#334155;">رابط الدخول إلى المنصة:</div>
+                      <div dir="ltr" style="font-family:'Courier New',monospace; font-size:8pt; font-weight:bold; color:#064e3b; word-break:break-all;">
+                        ${escapeHtml(cleanSiteUrl)}
+                      </div>
+                      <div style="font-size:7.5pt; color:#64748b; margin-top:2px;">
+                        افتح الرابط ← اختر «فضاء التلاميذ» ← أدخل رمز التفعيل أعلاه
+                      </div>
+                    </div>`
+                  : ''
+              }
+              <div style="font-size:8pt; color:#64748b;">
+                سري وشخصي للتلميذ(ة)${showSchoolIds ? ` | <span dir="ltr">${escapeHtml(s.identifier)}</span>` : ''}
+              </div>
+            </div>
+          </td>`;
+        })
+        .join('');
+      rows.push(`<tr style="page-break-inside:avoid;">${cells}</tr>`);
+    }
+
+    const wordDoc = `<html xmlns:o="urn:schemas-microsoft-com:office:office" xmlns:w="urn:schemas-microsoft-com:office:word" xmlns="http://www.w3.org/TR/REC-html40" dir="rtl" lang="ar">
+<head>
+  <meta charset="UTF-8" />
+  <title>قصاصات رموز التفعيل - ${escapeHtml(selectedClassName)}</title>
+  <style>
+    body { font-family: Arial, Tahoma, sans-serif; direction: rtl; text-align: right; }
+    table { width: 100%; border-collapse: collapse; }
+  </style>
+</head>
+<body>
+  <div style="text-align:center; border-bottom:2px solid #1e293b; padding-bottom:8px; margin-bottom:10px;">
+    <div style="font-size:10pt; font-weight:bold;">الجمهورية الجزائرية الديمقراطية الشعبية • وزارة التربية الوطنية</div>
+    <div style="font-size:14pt; font-weight:bold; margin:4px 0;">${escapeHtml(SCHOOL_NAME)} — قصاصات رموز تفعيل التلاميذ</div>
+    <div style="font-size:10pt;">القسم: ${escapeHtml(selectedClassName)} • العدد: ${filteredStudents.length} تلميذ(ة)</div>
+  </div>
+  <table dir="rtl">
+    <tbody>
+      ${rows.join('\n')}
+    </tbody>
+  </table>
+</body>
+</html>`;
+
+    triggerBlobDownload(
+      '\uFEFF' + wordDoc,
+      'application/msword;charset=utf-8;',
+      `قصاصات_التلاميذ_${fileSlug}.doc`
+    );
+    setSlipsDownloaded('doc');
+    setTimeout(() => setSlipsDownloaded(prev => (prev === 'doc' ? null : prev)), 2500);
+  };
+
   return (
     <div className="space-y-5 text-right">
       {/* Print-only Institutional Header */}
@@ -264,6 +544,46 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
               <FileSpreadsheet className="w-4 h-4 text-emerald-700" />
               <span>تصدير Excel (CSV)</span>
               <Download className="w-3.5 h-3.5" />
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadAllSlipsHtml}
+              disabled={filteredStudents.length === 0}
+              className="px-3.5 py-2 rounded-xl bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer transition-all"
+              title="تحميل جميع القصاصات في ملف واحد جاهز للطباعة أو الحفظ بصيغة PDF"
+            >
+              {slipsDownloaded === 'html' ? (
+                <>
+                  <Check className="w-4 h-4" />
+                  <span>تم تحميل {filteredStudents.length} قصاصة ✓</span>
+                </>
+              ) : (
+                <>
+                  <Download className="w-4 h-4" />
+                  <span>تحميل القصاصات دفعة واحدة ({filteredStudents.length})</span>
+                </>
+              )}
+            </button>
+
+            <button
+              type="button"
+              onClick={handleDownloadAllSlipsWord}
+              disabled={filteredStudents.length === 0}
+              className="px-3.5 py-2 rounded-xl bg-blue-50 hover:bg-blue-100 disabled:opacity-50 text-blue-900 border border-blue-300 text-xs font-bold flex items-center gap-1.5 cursor-pointer transition-all"
+              title="تحميل جميع القصاصات دفعة واحدة في ملف Word قابل للفتح والتعديل والطباعة"
+            >
+              {slipsDownloaded === 'doc' ? (
+                <>
+                  <Check className="w-4 h-4 text-blue-700" />
+                  <span>تم تحميل ملف Word ✓</span>
+                </>
+              ) : (
+                <>
+                  <FileText className="w-4 h-4 text-blue-700" />
+                  <span>تحميل القصاصات (Word)</span>
+                </>
+              )}
             </button>
 
             <button
