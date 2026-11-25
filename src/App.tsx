@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   ArrowRight,
   BookOpen,
@@ -85,35 +85,33 @@ export default function App() {
   const [selectedAnnouncementModal, setSelectedAnnouncementModal] =
     useState<SchoolAnnouncement | null>(null);
 
-  const refreshAllData = () => {
+  const refreshAllData = useCallback(() => {
     const u = getCurrentUser();
     setUser(u);
-    setDocuments(getDocuments());
-    setAnnouncements(getAnnouncements());
-    setSummons(getSummons());
+    setDocuments([...getDocuments()]);
+    setAnnouncements([...getAnnouncements()]);
+    setSummons([...getSummons()]);
     setNotifications(getRelevantNotifications(u));
     setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier, u));
-  };
+  }, []);
 
   useEffect(() => {
-    initStorage();
-    refreshAllData();
-
     const handleAuthChange = () => {
       const u = getCurrentUser();
       setUser(u);
       setNotifications(getRelevantNotifications(u));
       setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier, u));
     };
-    const handleDocsChange = () => setDocuments(getDocuments());
-    const handleAnnsChange = () => setAnnouncements(getAnnouncements());
-    const handleSummonsChange = () => setSummons(getSummons());
+    const handleDocsChange = () => setDocuments([...getDocuments()]);
+    const handleAnnsChange = () => setAnnouncements([...getAnnouncements()]);
+    const handleSummonsChange = () => setSummons([...getSummons()]);
     const handleNotifsChange = () => {
       const u = getCurrentUser();
       setNotifications(getRelevantNotifications(u));
       setUnreadNotifsCount(getUnreadNotificationsCount(u?.identifier, u));
     };
 
+    // Register listeners BEFORE initStorage so synchronous or immediate sync events are never missed
     window.addEventListener('auth-change', handleAuthChange);
     window.addEventListener('documents-change', handleDocsChange);
     window.addEventListener('announcements-change', handleAnnsChange);
@@ -126,6 +124,9 @@ export default function App() {
     };
     window.addEventListener('beforeinstallprompt', handleBeforeInstall);
 
+    initStorage();
+    refreshAllData();
+
     return () => {
       window.removeEventListener('auth-change', handleAuthChange);
       window.removeEventListener('documents-change', handleDocsChange);
@@ -134,7 +135,7 @@ export default function App() {
       window.removeEventListener('notifications-change', handleNotifsChange);
       window.removeEventListener('beforeinstallprompt', handleBeforeInstall);
     };
-  }, []);
+  }, [refreshAllData]);
 
   const prevPresenceIdRef = useRef<string | null>(null);
   const currentUserId = currentUser?.identifier || null;
@@ -557,13 +558,17 @@ export default function App() {
         currentUser={currentUser}
         onSelectNotification={notif => {
           if (notif.type === 'document' && notif.sourceId) {
-            const d = documents.find(doc => doc.id === notif.sourceId);
+            const d =
+              documents.find(doc => doc.id === notif.sourceId) ||
+              getDocuments().find(doc => doc.id === notif.sourceId);
             if (d) {
               setPreviewDoc(d);
               setNotificationsModalOpen(false);
             }
           } else if (notif.type === 'announcement' && notif.sourceId) {
-            const a = announcements.find(ann => ann.id === notif.sourceId);
+            const a =
+              announcements.find(ann => ann.id === notif.sourceId) ||
+              getAnnouncements().find(ann => ann.id === notif.sourceId);
             if (a) {
               setSelectedAnnouncementModal(a);
               if (currentUser) markAnnouncementAsSeen(a.id, currentUser.identifier);

@@ -108,6 +108,43 @@ const confirmedFirestoreAnnIds = new Set<string>();
 const serverAnnCacheMap = new Map<string, SchoolAnnouncement>();
 const firestoreAnnCacheMap = new Map<string, SchoolAnnouncement>();
 
+// Cross-tab BroadcastChannel for instantaneous same-browser tab updates
+let syncBroadcastChannel: BroadcastChannel | null = null;
+function getSyncBroadcastChannel(): BroadcastChannel | null {
+  if (typeof window === 'undefined' || typeof BroadcastChannel === 'undefined') return null;
+  if (!syncBroadcastChannel) {
+    try {
+      syncBroadcastChannel = new BroadcastChannel('ben_naama_sync');
+    } catch {
+      return null;
+    }
+  }
+  return syncBroadcastChannel;
+}
+
+function broadcastLocalEvent(type: 'announcements-change' | 'notifications-change' | 'sync-now'): void {
+  try {
+    getSyncBroadcastChannel()?.postMessage({ type, timestamp: Date.now() });
+  } catch {}
+}
+
+function getAnnouncementsSignature(list: SchoolAnnouncement[]): string {
+  return JSON.stringify(
+    list.map(a => ({
+      id: a.id,
+      title: a.title,
+      content: a.content,
+      target: a.target,
+      priority: a.priority,
+      badge: a.badge || '',
+      createdAt: a.createdAt || '',
+      authorName: a.authorName || '',
+      fileName: a.fileName || '',
+      hasFile: Boolean(a.fileDataUrl),
+    }))
+  );
+}
+
 // Startup & spam protection for notifications
 const APP_BOOT_MS = Date.now();
 let initialNotifsHydrated = false;
@@ -322,7 +359,7 @@ export function initStorage(): void {
   cachedSummons = getSummons();
   cachedPeerExchanges = getPeerExchanges();
 
-  // Listen for storage events from other tabs / windows
+  // Listen for storage events and BroadcastChannel messages from other tabs / windows
   if (!(window as any).__benNaamaStorageListener) {
     (window as any).__benNaamaStorageListener = true;
     window.addEventListener('storage', (e) => {
@@ -330,9 +367,12 @@ export function initStorage(): void {
         cachedDocuments = null;
         window.dispatchEvent(new Event('documents-change'));
       }
-      if (e.key === STORAGE_KEYS.ANNOUNCEMENTS) {
+      if (e.key === STORAGE_KEYS.ANNOUNCEMENTS || e.key === STORAGE_KEYS.DELETED_ANNOUNCEMENTS) {
         cachedAnnouncements = null;
         window.dispatchEvent(new Event('announcements-change'));
+      }
+      if (e.key === STORAGE_KEYS.NOTIFICATIONS) {
+        window.dispatchEvent(new Event('notifications-change'));
       }
       if (e.key === STORAGE_KEYS.SUMMONS) {
         cachedSummons = null;
@@ -352,6 +392,21 @@ export function initStorage(): void {
         window.dispatchEvent(new Event('auth-change'));
       }
     });
+
+    const channel = getSyncBroadcastChannel();
+    if (channel) {
+      channel.onmessage = (event: MessageEvent) => {
+        const msgType = event?.data?.type;
+        if (msgType === 'announcements-change') {
+          cachedAnnouncements = null;
+          window.dispatchEvent(new Event('announcements-change'));
+        } else if (msgType === 'notifications-change') {
+          window.dispatchEvent(new Event('notifications-change'));
+        } else if (msgType === 'sync-now') {
+          syncWithServer().catch(() => {});
+        }
+      };
+    }
   }
 
   // Start real-time Firestore Cloud Database Synchronization
@@ -570,14 +625,22 @@ export function initStorage(): void {
   // Start real-time server synchronization across devices
   syncWithServer();
   if (!(window as any).__benNaamaSyncInterval) {
-    (window as any).__benNaamaSyncInterval = setInterval(syncWithServer, 2500);
+    (window as any).__benNaamaSyncInterval = setInterval(() => {
+      syncWithServer().catch(() => {});
+    }, 2500);
     window.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        syncWithServer();
+        syncWithServer().catch(() => {});
       }
     });
+    window.addEventListener('focus', () => {
+      syncWithServer().catch(() => {});
+    });
+    window.addEventListener('pageshow', () => {
+      syncWithServer().catch(() => {});
+    });
     window.addEventListener('online', () => {
-      syncWithServer();
+      syncWithServer().catch(() => {});
     });
     window.addEventListener('offline', () => {
       updateSyncStatus('offline');
@@ -1660,27 +1723,33 @@ export async function downloadAnnouncementAttachment(ann: SchoolAnnouncement): P
 
 // Announcements
 export function getAnnouncements(): SchoolAnnouncement[] {
-  if (cachedAnnouncements && cachedAnnouncements.length > 0) {
-    return cachedAnnouncements;
+  const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
+  if (cachedAnnouncements !== null) {
+    return cachedAnnouncements.filter(a => a && a.id && !deletedSet.has(a.id));
   }
   try {
     if (typeof window !== 'undefined') {
       const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
-      if (raw) {
+      if (raw !== null) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          const sorted = [...parsed].sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
+          const sorted = [...parsed]
+            .filter(a => a && a.id && !deletedSet.has(a.id))
+            .sort(
+              (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            );
           cachedAnnouncements = sorted;
-          return sorted;
+          return [...sorted];
         }
       }
     }
   } catch (err) {
     console.debug('Error reading local announcements:', err);
   }
-  return cachedAnnouncements && cachedAnnouncements.length > 0 ? cachedAnnouncements : INITIAL_ANNOUNCEMENTS;
+  const fallback = INITIAL_ANNOUNCEMENTS
+    .filter(a => a && a.id && !deletedSet.has(a.id))
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+  return [...fallback];
 }
 
 function prepareAnnouncementLocally(
@@ -1709,6 +1778,7 @@ function prepareAnnouncementLocally(
   cachedAnnouncements = updated;
   safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
+  broadcastLocalEvent('announcements-change');
 
   // Save attachment to persistent IndexedDB
   if (newAnn.fileDataUrl) {
@@ -1735,6 +1805,7 @@ function prepareAnnouncementLocally(
   };
   sessionAlertedNotifIds.add(annNotif.id);
   addNotificationLocally(annNotif, false);
+  broadcastLocalEvent('notifications-change');
 
   return { newAnn, annNotif };
 }
@@ -1775,6 +1846,8 @@ export async function saveAnnouncementAsync(
     if (pendingSet.delete(newAnn.id)) {
       saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
     }
+    broadcastLocalEvent('sync-now');
+    syncWithServer().catch(() => {});
   }
   if (cloudSaved) {
     confirmedFirestoreAnnIds.add(newAnn.id);
@@ -1814,6 +1887,7 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
         if (pendingSet.delete(newAnn.id)) {
           saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
         }
+        broadcastLocalEvent('sync-now');
       }
     })
     .catch(() => {});
@@ -1842,6 +1916,7 @@ export function deleteAnnouncement(annId: string): void {
   }
 
   window.dispatchEvent(new Event('announcements-change'));
+  broadcastLocalEvent('announcements-change');
 
   // 1. Direct Cloud Database Delete
   deleteAnnouncementFromFirestore(annId).catch(err => {
@@ -2851,28 +2926,38 @@ export function updateSyncStatus(newStatus: SyncStatus): void {
   }
 }
 
-let isSyncing = false;
-export async function syncWithServer(): Promise<void> {
-  if (typeof window === 'undefined') return;
-  if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    updateSyncStatus('offline');
-    return;
-  }
-  if (isSyncing) return;
-  isSyncing = true;
-  updateSyncStatus('syncing');
-
+async function fetchWithTimeout(
+  url: string,
+  options: RequestInit = {},
+  timeoutMs: number = 8000
+): Promise<Response> {
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const timer = controller ? setTimeout(() => controller.abort(), timeoutMs) : null;
   try {
-    const syncRes = await fetch('/api/sync', { cache: 'no-store' });
+    return await fetch(url, {
+      ...options,
+      cache: 'no-store',
+      ...(controller ? { signal: controller.signal } : {}),
+    });
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
-    if (syncRes.ok) {
-      lastSuccessfulSyncTime = Date.now();
-      updateSyncStatus('connected');
-      const contentType = syncRes.headers.get('content-type') || '';
-      if (!contentType.includes('application/json')) {
-        return;
-      }
+let isSyncing = false;
+let resyncRequested = false;
+let inFlightSyncPromise: Promise<void> | null = null;
 
+async function runSingleSyncPass(): Promise<void> {
+  const syncRes = await fetchWithTimeout('/api/sync', {}, 8000);
+
+  if (!syncRes.ok) {
+    updateSyncStatus('offline');
+  } else {
+    lastSuccessfulSyncTime = Date.now();
+    updateSyncStatus('connected');
+    const contentType = syncRes.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
       const data = await syncRes.json();
 
       if (data.serverTime) {
@@ -2886,17 +2971,21 @@ export async function syncWithServer(): Promise<void> {
       if (Array.isArray(data.documents)) {
         const currentLocal = cachedDocuments && cachedDocuments.length > 0 ? cachedDocuments : getDocuments();
         const serverDocIds = new Set(data.documents.map((d: SchoolDocument) => d.id));
-        
+
         // Find documents saved locally that the server hasn't seen yet
         const unsyncedLocals = currentLocal.filter(d => !serverDocIds.has(d.id));
 
         // Re-push unsynced local documents to ensure they reach the server and other devices
         for (const un of unsyncedLocals) {
-          fetch('/api/documents', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(un),
-          }).catch(() => {});
+          fetchWithTimeout(
+            '/api/documents',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(un),
+            },
+            6000
+          ).catch(() => {});
         }
 
         // Unified documents list: unsynced locals at top, then server documents
@@ -2974,29 +3063,36 @@ export async function syncWithServer(): Promise<void> {
           }
         }
 
-        for (const un of unsyncedAnns) {
-          fetch('/api/announcements', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            cache: 'no-store',
-            body: JSON.stringify(un),
-          })
-            .then(res => {
-              if (res.ok) {
-                confirmedServerAnnIds.add(un.id);
-                serverAnnCacheMap.set(un.id, un);
-                const pSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-                if (pSet.delete(un.id)) {
-                  saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pSet);
+        if (unsyncedAnns.length > 0) {
+          await Promise.allSettled(
+            unsyncedAnns.map(un =>
+              fetchWithTimeout(
+                '/api/announcements',
+                {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify(un),
+                },
+                5000
+              ).then(res => {
+                if (res.ok) {
+                  confirmedServerAnnIds.add(un.id);
+                  serverAnnCacheMap.set(un.id, un);
+                  const pSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+                  if (pSet.delete(un.id)) {
+                    saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pSet);
+                  }
                 }
-              }
-            })
-            .catch(() => {});
+              })
+            )
+          );
         }
 
         const mergedMap = new Map<string, SchoolAnnouncement>();
         for (const un of unsyncedAnns) {
-          mergedMap.set(un.id, un);
+          if (!deletedSet.has(un.id)) {
+            mergedMap.set(un.id, un);
+          }
         }
         for (const sAnn of data.announcements as SchoolAnnouncement[]) {
           if (!sAnn || !sAnn.id || deletedSet.has(sAnn.id)) continue;
@@ -3012,12 +3108,32 @@ export async function syncWithServer(): Promise<void> {
           (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
         );
 
-        const prevAnnsStr = JSON.stringify(currentAnns.map(a => ({ id: a.id, title: a.title, content: a.content })));
-        const newAnnsStr = JSON.stringify(mergedAnns.map(a => ({ id: a.id, title: a.title, content: a.content })));
-        if (prevAnnsStr !== newAnnsStr || !cachedAnnouncements || cachedAnnouncements.length !== mergedAnns.length) {
+        const prevAnnsStr = getAnnouncementsSignature(currentAnns);
+        const newAnnsStr = getAnnouncementsSignature(mergedAnns);
+        const annsDataChanged = prevAnnsStr !== newAnnsStr;
+        if (annsDataChanged || cachedAnnouncements === null) {
           cachedAnnouncements = mergedAnns;
           safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(mergedAnns));
           window.dispatchEvent(new Event('announcements-change'));
+          if (annsDataChanged) {
+            broadcastLocalEvent('announcements-change');
+          }
+
+          // Hydrate any missing attachment payloads from IndexedDB
+          mergedAnns.forEach(a => {
+            if (!a.fileDataUrl && a.fileName) {
+              getFileFromIndexedDb(a.id)
+                .then(stored => {
+                  if (stored?.dataUrl && cachedAnnouncements) {
+                    cachedAnnouncements = cachedAnnouncements.map(item =>
+                      item.id === a.id ? { ...item, fileDataUrl: stored.dataUrl } : item
+                    );
+                    window.dispatchEvent(new Event('announcements-change'));
+                  }
+                })
+                .catch(() => {});
+            }
+          });
         }
       }
 
@@ -3027,11 +3143,15 @@ export async function syncWithServer(): Promise<void> {
         const serverSummonIds = new Set(data.summons.map((s: ParentSummon) => s.id));
         const unsyncedSummons = currentSummons.filter(s => !serverSummonIds.has(s.id));
         for (const un of unsyncedSummons) {
-          fetch('/api/summons', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(un),
-          }).catch(() => {});
+          fetchWithTimeout(
+            '/api/summons',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(un),
+            },
+            6000
+          ).catch(() => {});
         }
         const mergedSummons = [...unsyncedSummons, ...data.summons];
         const prevSummonsStr = JSON.stringify(currentSummons.map(s => s.id));
@@ -3049,11 +3169,15 @@ export async function syncWithServer(): Promise<void> {
         const serverPeerIds = new Set(data.peerExchanges.map((p: PeerExchangePost) => p.id));
         const unsyncedPeer = currentPeer.filter(p => !serverPeerIds.has(p.id));
         for (const un of unsyncedPeer) {
-          fetch('/api/peer-exchanges', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(un),
-          }).catch(() => {});
+          fetchWithTimeout(
+            '/api/peer-exchanges',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(un),
+            },
+            6000
+          ).catch(() => {});
         }
         const mergedPeer = [...unsyncedPeer, ...data.peerExchanges];
         const prevPeerStr = JSON.stringify(currentPeer.map(p => ({ id: p.id, thanks: p.thanksCount, reps: p.replies?.length })));
@@ -3067,9 +3191,10 @@ export async function syncWithServer(): Promise<void> {
 
       // 5. User custom pins (timestamp-aware merge so stale server pins never overwrite newer Firestore approvals)
       if (data.userCustomPins && typeof data.userCustomPins === 'object') {
-        const timestamps: Record<string, string> = data.userCustomPinTimestamps && typeof data.userCustomPinTimestamps === 'object'
-          ? data.userCustomPinTimestamps
-          : {};
+        const timestamps: Record<string, string> =
+          data.userCustomPinTimestamps && typeof data.userCustomPinTimestamps === 'object'
+            ? data.userCustomPinTimestamps
+            : {};
         let pinUpdated = false;
         for (const [id, customPin] of Object.entries(data.userCustomPins)) {
           if (typeof customPin === 'string' && customPin.trim().length >= 4) {
@@ -3119,11 +3244,15 @@ export async function syncWithServer(): Promise<void> {
           s => !serverIds.has(normalizeIdentifier(s.identifier))
         );
         for (const un of unsyncedCustom) {
-          fetch('/api/custom-students', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(un),
-          }).catch(() => {});
+          fetchWithTimeout(
+            '/api/custom-students',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(un),
+            },
+            6000
+          ).catch(() => {});
         }
         const map = new Map<string, UserProfile>();
         for (const s of data.customStudents) {
@@ -3142,90 +3271,118 @@ export async function syncWithServer(): Promise<void> {
         }
       }
     }
+  }
 
-    // 6. User Notifications (Merge instead of overwriting so local/Firestore/Server stay in sync)
-    const user = getCurrentUser();
-    const query = new URLSearchParams();
-    if (user) {
-      query.set('userId', user.identifier);
-      query.set('role', user.role);
-      if (user.classId) query.set('classId', user.classId);
+  // 6. User Notifications (Merge instead of overwriting so local/Firestore/Server stay in sync)
+  const user = getCurrentUser();
+  const query = new URLSearchParams();
+  if (user) {
+    query.set('userId', user.identifier);
+    query.set('role', user.role);
+    if (user.classId) query.set('classId', user.classId);
+  }
+  const notifsRes = await fetchWithTimeout(`/api/notifications?${query.toString()}`, {}, 8000);
+  if (notifsRes.ok) {
+    const serverNotifs: AppNotification[] = await notifsRes.json();
+    if (Array.isArray(serverNotifs)) {
+      const currentNotifs = getNotifications();
+      const currentIds = new Set(currentNotifs.map(n => n.id));
+      const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
+      const mergedNotifs = mergeNotificationsLists(currentNotifs, serverNotifs);
+
+      safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(mergedNotifs));
+      window.dispatchEvent(new Event('notifications-change'));
+
+      maybeAlertSingleFreshNotification(brandNew);
+      initialNotifsHydrated = true;
     }
-    const notifsRes = await fetch(`/api/notifications?${query.toString()}`, { cache: 'no-store' });
-    if (notifsRes.ok) {
-      const serverNotifs: AppNotification[] = await notifsRes.json();
-      if (Array.isArray(serverNotifs)) {
-        const currentNotifs = getNotifications();
-        const currentIds = new Set(currentNotifs.map(n => n.id));
-        const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
-        const mergedNotifs = mergeNotificationsLists(currentNotifs, serverNotifs);
+  }
 
-        safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(mergedNotifs));
-        window.dispatchEvent(new Event('notifications-change'));
-
-        maybeAlertSingleFreshNotification(brandNew);
-        initialNotifsHydrated = true;
+  // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
+  if (user) {
+    try {
+      let syncUrl = '';
+      if (user.role === 'student') {
+        syncUrl = `/api/conversations-sync?studentId=${encodeURIComponent(user.identifier)}`;
+      } else if (user.role === 'director' || user.role === 'censor') {
+        syncUrl = `/api/conversations-sync?role=${encodeURIComponent(user.role)}`;
       }
-    }
 
-    // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
-    if (user) {
-      try {
-        let syncUrl = '';
-        if (user.role === 'student') {
-          syncUrl = `/api/conversations-sync?studentId=${encodeURIComponent(user.identifier)}`;
-        } else if (user.role === 'director' || user.role === 'censor') {
-          syncUrl = `/api/conversations-sync?role=${encodeURIComponent(user.role)}`;
-        }
+      if (syncUrl) {
+        const convSyncRes = await fetchWithTimeout(syncUrl, {}, 8000);
+        if (convSyncRes.ok) {
+          const convData = await convSyncRes.json();
+          const serverConvs: PrivateConversation[] = convData.conversations || [];
+          const serverMsgs: PrivateMessage[] = convData.messages || [];
 
-        if (syncUrl) {
-          const syncRes = await fetch(syncUrl);
-          if (syncRes.ok) {
-            const data = await syncRes.json();
-            const serverConvs: PrivateConversation[] = data.conversations || [];
-            const serverMsgs: PrivateMessage[] = data.messages || [];
-
-            if (Array.isArray(serverConvs)) {
-              const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
-              const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
-              const localOtherUserConvs = user.role === 'student'
+          if (Array.isArray(serverConvs)) {
+            const raw = localStorage.getItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS);
+            const localConvs: PrivateConversation[] = raw ? JSON.parse(raw) : [];
+            const localOtherUserConvs =
+              user.role === 'student'
                 ? localConvs.filter(c => !c.participantIds?.includes(user.identifier))
                 : [];
-              const mergedConvs = [...localOtherUserConvs, ...serverConvs];
-              const prevStr = JSON.stringify(localConvs.map(c => ({ id: c.id, upd: c.updatedAt, last: c.lastMessage })));
-              const newStr = JSON.stringify(mergedConvs.map(c => ({ id: c.id, upd: c.updatedAt, last: c.lastMessage })));
-              if (prevStr !== newStr) {
-                safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(mergedConvs));
-                window.dispatchEvent(new Event('private-conversations-change'));
-              }
+            const mergedConvs = [...localOtherUserConvs, ...serverConvs];
+            const prevStr = JSON.stringify(localConvs.map(c => ({ id: c.id, upd: c.updatedAt, last: c.lastMessage })));
+            const newStr = JSON.stringify(mergedConvs.map(c => ({ id: c.id, upd: c.updatedAt, last: c.lastMessage })));
+            if (prevStr !== newStr) {
+              safeSetItem(STORAGE_KEYS.PRIVATE_CONVERSATIONS, JSON.stringify(mergedConvs));
+              window.dispatchEvent(new Event('private-conversations-change'));
             }
+          }
 
-            if (Array.isArray(serverMsgs) && serverMsgs.length > 0) {
-              const rawMsgs = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
-              const localMsgs: PrivateMessage[] = rawMsgs ? JSON.parse(rawMsgs) : [];
-              const serverMsgIds = new Set(serverMsgs.map(m => m.id));
-              const localUnique = localMsgs.filter(m => !serverMsgIds.has(m.id));
-              const mergedMsgs = [...serverMsgs, ...localUnique];
-              if (mergedMsgs.length !== localMsgs.length) {
-                safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify(mergedMsgs));
-                window.dispatchEvent(new Event('private-messages-change'));
-              }
+          if (Array.isArray(serverMsgs) && serverMsgs.length > 0) {
+            const rawMsgs = localStorage.getItem(STORAGE_KEYS.PRIVATE_MESSAGES);
+            const localMsgs: PrivateMessage[] = rawMsgs ? JSON.parse(rawMsgs) : [];
+            const serverMsgIds = new Set(serverMsgs.map(m => m.id));
+            const localUnique = localMsgs.filter(m => !serverMsgIds.has(m.id));
+            const mergedMsgs = [...serverMsgs, ...localUnique];
+            if (mergedMsgs.length !== localMsgs.length) {
+              safeSetItem(STORAGE_KEYS.PRIVATE_MESSAGES, JSON.stringify(mergedMsgs));
+              window.dispatchEvent(new Event('private-messages-change'));
             }
           }
         }
-      } catch {}
-    }
-  } catch (err) {
-    console.debug('[Sync] Sync network or transient offline:', err);
-    updateSyncStatus('offline');
-  } finally {
-    isSyncing = false;
-    if (typeof navigator !== 'undefined' && !navigator.onLine) {
-      updateSyncStatus('offline');
-    } else if (lastSuccessfulSyncTime && Date.now() - lastSuccessfulSyncTime < 10000) {
-      updateSyncStatus('connected');
-    }
+      }
+    } catch {}
   }
+}
+
+export async function syncWithServer(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    updateSyncStatus('offline');
+    return;
+  }
+  if (isSyncing) {
+    resyncRequested = true;
+    return inFlightSyncPromise || Promise.resolve();
+  }
+
+  isSyncing = true;
+  updateSyncStatus('syncing');
+
+  inFlightSyncPromise = (async () => {
+    try {
+      do {
+        resyncRequested = false;
+        await runSingleSyncPass();
+      } while (resyncRequested && (typeof navigator === 'undefined' || navigator.onLine));
+    } catch (err) {
+      console.debug('[Sync] Sync network or transient offline:', err);
+      updateSyncStatus('offline');
+    } finally {
+      isSyncing = false;
+      inFlightSyncPromise = null;
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        updateSyncStatus('offline');
+      } else if (lastSuccessfulSyncTime && Date.now() - lastSuccessfulSyncTime < 10000) {
+        updateSyncStatus('connected');
+      }
+    }
+  })();
+
+  return inFlightSyncPromise;
 }
 
 // ================= دوال إدارة التنبيهات والإعلانات المقروءة (Notifications & Seen Announcements) =================
