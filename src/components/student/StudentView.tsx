@@ -262,8 +262,6 @@ export const StudentView: React.FC<StudentViewProps> = ({
     return studentAnnouncements.filter(a => seenAnnIds.includes(a.id));
   }, [studentAnnouncements, seenAnnIds]);
 
-  const latestUnreadAnn = unreadAnnouncements[0] || null;
-
   const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
     if (ann.fileName) {
       setPreviewDoc({
@@ -421,53 +419,85 @@ export const StudentView: React.FC<StudentViewProps> = ({
         )}
       </div>
 
-      {/* Quiet Single New Announcement Notice (ONLY shows latest unread announcement, never all announcements) */}
-      {latestUnreadAnn && activeTab !== 'announcements' && (
-        <div className="bg-gradient-to-l from-amber-50 via-white to-emerald-50/70 border border-amber-300/90 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4">
-          <div className="flex items-start gap-3 min-w-0">
-            <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 border border-amber-200 flex items-center justify-center shrink-0 mt-0.5">
-              <Bell className="w-5 h-5" />
-            </div>
-            <div className="min-w-0 space-y-1">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-600 text-white">
-                  إعلان جديد للتلاميذ
-                </span>
-                <span className="text-xs text-slate-500 font-medium">
-                  {latestUnreadAnn.authorName} • {new Date(latestUnreadAnn.createdAt).toLocaleDateString('ar-DZ')}
-                </span>
-                {unreadAnnouncements.length > 1 && (
-                  <span className="text-[11px] text-amber-800 font-semibold">
-                    (و{unreadAnnouncements.length - 1} إعلان آخر غير مقروء)
-                  </span>
-                )}
+      {/* New Unread Announcements Notice (shows ONLY unread announcements, keeping read archive hidden) */}
+      {unreadAnnouncements.length > 0 && activeTab !== 'announcements' && (
+        <div className="space-y-2.5">
+          {unreadAnnouncements.length > 1 && (
+            <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+              <span className="text-xs font-extrabold text-amber-900 flex items-center gap-1.5">
+                <Bell className="w-4 h-4 text-amber-600" />
+                <span>لديك {unreadAnnouncements.length} إعلانات جديدة غير مقروءة</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('announcements')}
+                  className="text-xs font-bold text-emerald-700 hover:underline cursor-pointer"
+                >
+                  فتح الكل ({unreadAnnouncements.length})
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    markAllAnnouncementsAsSeen(
+                      unreadAnnouncements.map(a => a.id),
+                      currentUser.identifier
+                    )
+                  }
+                  className="text-xs font-bold text-slate-600 hover:text-slate-900 hover:underline cursor-pointer"
+                >
+                  تعليم الكل كمقروء ✓
+                </button>
               </div>
-              <h3 className="text-sm sm:text-base font-extrabold text-slate-900 truncate">
-                {latestUnreadAnn.title}
-              </h3>
-              <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
-                {latestUnreadAnn.content}
-              </p>
             </div>
-          </div>
+          )}
 
-          <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
-            <button
-              type="button"
-              onClick={() => setActiveTab('announcements')}
-              className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+          {unreadAnnouncements.slice(0, 3).map(ann => (
+            <div
+              key={ann.id}
+              className="bg-gradient-to-l from-amber-50 via-white to-emerald-50/70 border border-amber-300/90 rounded-2xl p-4 shadow-xs flex flex-col md:flex-row md:items-center justify-between gap-4"
             >
-              قراءة الإعلان
-            </button>
-            <button
-              type="button"
-              onClick={() => markAnnouncementAsSeen(latestUnreadAnn.id, currentUser.identifier)}
-              className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs transition-colors cursor-pointer"
-              title="إخفاء هذا الإشعار"
-            >
-              تم الاطلاع ✓
-            </button>
-          </div>
+              <div className="flex items-start gap-3 min-w-0">
+                <div className="w-10 h-10 rounded-xl bg-amber-100 text-amber-800 border border-amber-200 flex items-center justify-center shrink-0 mt-0.5">
+                  <Bell className="w-5 h-5" />
+                </div>
+                <div className="min-w-0 space-y-1">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-600 text-white">
+                      إعلان جديد للتلاميذ
+                    </span>
+                    <span className="text-xs text-slate-500 font-medium">
+                      {ann.authorName} • {new Date(ann.createdAt).toLocaleDateString('ar-DZ')}
+                    </span>
+                  </div>
+                  <h3 className="text-sm sm:text-base font-extrabold text-slate-900 truncate">
+                    {ann.title}
+                  </h3>
+                  <p className="text-xs text-slate-600 line-clamp-2 leading-relaxed">
+                    {ann.content}
+                  </p>
+                </div>
+              </div>
+
+              <div className="flex items-center gap-2 shrink-0 self-end md:self-center">
+                <button
+                  type="button"
+                  onClick={() => setActiveTab('announcements')}
+                  className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs transition-colors shadow-2xs cursor-pointer"
+                >
+                  قراءة الإعلان
+                </button>
+                <button
+                  type="button"
+                  onClick={() => markAnnouncementAsSeen(ann.id, currentUser.identifier)}
+                  className="px-3.5 py-2 rounded-xl bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 font-bold text-xs transition-colors cursor-pointer"
+                  title="إخفاء هذا الإشعار"
+                >
+                  تم الاطلاع ✓
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
       )}
 

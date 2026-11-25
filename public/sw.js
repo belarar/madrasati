@@ -1,5 +1,5 @@
 // Service Worker for Ben Naama School Digital Platform
-const CACHE_NAME = 'ben-naama-v4';
+const CACHE_NAME = 'ben-naama-v5';
 const ASSETS_TO_CACHE = [
   '/manifest.json',
   '/favicon.ico',

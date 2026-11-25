@@ -139,7 +139,11 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
     dataUrl?: string;
   } | null>(null);
   const [teacherAnnSuccess, setTeacherAnnSuccess] = useState<string | null>(null);
+  const [isSubmittingAnn, setIsSubmittingAnn] = useState(false);
   const teacherAnnFileRef = useRef<HTMLInputElement>(null);
+  const annTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const annDraftRef = useRef({ title: '', content: '' });
+  annDraftRef.current = { title: teacherAnnTitle, content: teacherAnnContent };
 
   const handleTeacherAnnFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -181,33 +185,49 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
 
   const handleCreateTeacherAnn = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!teacherAnnTitle.trim() || !teacherAnnContent.trim()) return;
+    if (isSubmittingAnn || !teacherAnnTitle.trim() || !teacherAnnContent.trim()) return;
 
-    await saveAnnouncementAsync({
-      title: teacherAnnTitle.trim(),
-      content: teacherAnnContent.trim(),
-      target: teacherAnnTarget,
-      priority: teacherAnnPriority,
-      authorName: `${currentUser.name} (أستاذة ${currentUser.title || 'المادة'})`,
-      authorRole: 'teacher',
-      badge: 'إعلان الأستاذ(ة)',
-      fileName: teacherAnnFile?.name,
-      fileSize: teacherAnnFile?.size,
-      fileFormat: teacherAnnFile?.format,
-      fileDataUrl: teacherAnnFile?.dataUrl,
-    });
+    if (annTimerRef.current) {
+      clearTimeout(annTimerRef.current);
+      annTimerRef.current = null;
+    }
 
-    onRefreshData();
-    setTeacherAnnSuccess('تم نشر الإعلان لتلاميذك مع المرفق بنجاح وحفظه في قاعدة البيانات!');
-    setTeacherAnnTitle('');
-    setTeacherAnnContent('');
-    setTeacherAnnFile(null);
-    if (teacherAnnFileRef.current) teacherAnnFileRef.current.value = '';
+    setIsSubmittingAnn(true);
+    try {
+      const result = await saveAnnouncementAsync({
+        title: teacherAnnTitle.trim(),
+        content: teacherAnnContent.trim(),
+        target: teacherAnnTarget,
+        priority: teacherAnnPriority,
+        authorName: `${currentUser.name} (أستاذة ${currentUser.title || 'المادة'})`,
+        authorRole: 'teacher',
+        badge: 'إعلان الأستاذ(ة)',
+        fileName: teacherAnnFile?.name,
+        fileSize: teacherAnnFile?.size,
+        fileFormat: teacherAnnFile?.format,
+        fileDataUrl: teacherAnnFile?.dataUrl,
+      });
 
-    setTimeout(() => {
-      setTeacherAnnSuccess(null);
-      setShowTeacherAnnForm(false);
-    }, 2000);
+      onRefreshData();
+      setTeacherAnnSuccess(
+        result.serverSaved
+          ? 'تم نشر الإعلان لتلاميذك وحفظه في قاعدة البيانات بنجاح!'
+          : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
+      );
+      setTeacherAnnTitle('');
+      setTeacherAnnContent('');
+      setTeacherAnnFile(null);
+      if (teacherAnnFileRef.current) teacherAnnFileRef.current.value = '';
+
+      annTimerRef.current = setTimeout(() => {
+        setTeacherAnnSuccess(null);
+        if (!annDraftRef.current.title.trim() && !annDraftRef.current.content.trim()) {
+          setShowTeacherAnnForm(false);
+        }
+      }, 1500);
+    } finally {
+      setIsSubmittingAnn(false);
+    }
   };
 
   const handlePreviewAnnAttachment = (ann: SchoolAnnouncement) => {
@@ -1030,10 +1050,20 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
                   </button>
                   <button
                     type="submit"
-                    className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all active:scale-95"
+                    disabled={isSubmittingAnn}
+                    className="px-5 py-2.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white text-xs font-bold flex items-center gap-1.5 shadow-sm cursor-pointer transition-all active:scale-95"
                   >
-                    <Send className="w-3.5 h-3.5" />
-                    <span>نشر الإعلان فورياً لتلاميذك</span>
+                    {isSubmittingAnn ? (
+                      <>
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span>جارٍ النشر...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Send className="w-3.5 h-3.5" />
+                        <span>نشر الإعلان فورياً لتلاميذك</span>
+                      </>
+                    )}
                   </button>
                 </div>
               </form>

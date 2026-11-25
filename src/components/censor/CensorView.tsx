@@ -132,6 +132,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
   const [annPriority, setAnnPriority] = useState<AnnouncementPriority>('important');
   const [annBadge, setAnnBadge] = useState('إعلان الناظر');
   const [annSuccess, setAnnSuccess] = useState<string | null>(null);
+  const [isSubmittingAnn, setIsSubmittingAnn] = useState(false);
   const [annUploadedFile, setAnnUploadedFile] = useState<{
     name: string;
     size: string;
@@ -139,6 +140,9 @@ export const CensorView: React.FC<CensorViewProps> = ({
     dataUrl?: string;
   } | null>(null);
   const annFileInputRef = useRef<HTMLInputElement>(null);
+  const annTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const annDraftRef = useRef({ title: '', content: '' });
+  annDraftRef.current = { title: annTitle, content: annContent };
 
   const handleAnnFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -253,34 +257,50 @@ export const CensorView: React.FC<CensorViewProps> = ({
 
   const handleCreateAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!annTitle.trim() || !annContent.trim()) return;
+    if (isSubmittingAnn || !annTitle.trim() || !annContent.trim()) return;
 
-    await saveAnnouncementAsync({
-      title: annTitle.trim(),
-      content: annContent.trim(),
-      target: annTarget,
-      priority: annPriority,
-      authorName: `${currentUser.name} (ناظر المتوسطة)`,
-      authorRole: 'censor',
-      badge: annBadge.trim() || 'توجيهات الناظر',
-      fileName: annUploadedFile?.name,
-      fileSize: annUploadedFile?.size,
-      fileFormat: annUploadedFile?.format,
-      fileDataUrl: annUploadedFile?.dataUrl,
-    });
+    if (annTimerRef.current) {
+      clearTimeout(annTimerRef.current);
+      annTimerRef.current = null;
+    }
 
-    onRefreshData();
-    setAnnSuccess('تم نشر الإعلان مع المرفق بنجاح وحفظه في قاعدة البيانات!');
+    setIsSubmittingAnn(true);
+    try {
+      const result = await saveAnnouncementAsync({
+        title: annTitle.trim(),
+        content: annContent.trim(),
+        target: annTarget,
+        priority: annPriority,
+        authorName: `${currentUser.name} (ناظر المتوسطة)`,
+        authorRole: 'censor',
+        badge: annBadge.trim() || 'توجيهات الناظر',
+        fileName: annUploadedFile?.name,
+        fileSize: annUploadedFile?.size,
+        fileFormat: annUploadedFile?.format,
+        fileDataUrl: annUploadedFile?.dataUrl,
+      });
 
-    setAnnTitle('');
-    setAnnContent('');
-    setAnnUploadedFile(null);
-    if (annFileInputRef.current) annFileInputRef.current.value = '';
+      onRefreshData();
+      setAnnSuccess(
+        result.serverSaved
+          ? 'تم نشر الإعلان وإرساله وحفظه في قاعدة البيانات بنجاح!'
+          : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
+      );
 
-    setTimeout(() => {
-      setAnnSuccess(null);
-      setActiveTab('announcements');
-    }, 1800);
+      setAnnTitle('');
+      setAnnContent('');
+      setAnnUploadedFile(null);
+      if (annFileInputRef.current) annFileInputRef.current.value = '';
+
+      annTimerRef.current = setTimeout(() => {
+        setAnnSuccess(null);
+        if (!annDraftRef.current.title.trim() && !annDraftRef.current.content.trim()) {
+          setActiveTab('announcements');
+        }
+      }, 1500);
+    } finally {
+      setIsSubmittingAnn(false);
+    }
   };
 
   const filteredSummons = summons.filter(s => {
@@ -295,7 +315,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
   });
 
   const censorAnnouncements = announcements.filter(
-    a => a.authorRole === 'censor' || a.target === 'students'
+    a => a.authorRole === 'censor' || a.target === 'students' || a.target === 'all'
   );
 
   return (
@@ -1428,10 +1448,20 @@ export const CensorView: React.FC<CensorViewProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
+              disabled={isSubmittingAnn}
+              className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Send className="w-4 h-4" />
-              <span>نشر الإعلان مع المرفق فورياً</span>
+              {isSubmittingAnn ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>جارٍ نشر الإعلان...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>نشر الإعلان مع المرفق فورياً</span>
+                </>
+              )}
             </button>
           </form>
         </div>

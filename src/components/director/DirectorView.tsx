@@ -101,6 +101,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   const [annPriority, setAnnPriority] = useState<AnnouncementPriority>('important');
   const [annBadge, setAnnBadge] = useState('منشور المدير');
   const [annSuccess, setAnnSuccess] = useState<string | null>(null);
+  const [isSubmittingAnn, setIsSubmittingAnn] = useState(false);
   const [annUploadedFile, setAnnUploadedFile] = useState<{
     name: string;
     size: string;
@@ -108,6 +109,9 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     dataUrl?: string;
   } | null>(null);
   const annFileInputRef = useRef<HTMLInputElement>(null);
+  const annTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const annDraftRef = useRef({ title: '', content: '' });
+  annDraftRef.current = { title: annTitle, content: annContent };
 
   // Administrative Document Upload Form State
   const [docTitle, setDocTitle] = useState('');
@@ -176,6 +180,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     return () => {
       unsubscribe();
       clearInterval(expiryTick);
+      if (annTimerRef.current) clearTimeout(annTimerRef.current);
     };
   }, []);
 
@@ -246,38 +251,52 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
   const handleCreateAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!annTitle.trim() || !annContent.trim()) return;
+    if (isSubmittingAnn || !annTitle.trim() || !annContent.trim()) return;
 
-    const result = await saveAnnouncementAsync({
-      title: annTitle.trim(),
-      content: annContent.trim(),
-      target: annTarget,
-      priority: annPriority,
-      authorName: `${currentUser.name} (مدير المتوسطة)`,
-      authorRole: 'director',
-      badge: annBadge.trim() || 'بلاغ الإدارة',
-      fileName: annUploadedFile?.name,
-      fileSize: annUploadedFile?.size,
-      fileFormat: annUploadedFile?.format,
-      fileDataUrl: annUploadedFile?.dataUrl,
-    });
+    if (annTimerRef.current) {
+      clearTimeout(annTimerRef.current);
+      annTimerRef.current = null;
+    }
 
-    onRefreshData();
-    setAnnSuccess(
-      result.serverSaved
-        ? 'تم نشر الإعلان وإرساله للتلاميذ والأساتذة بنجاح!'
-        : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
-    );
+    setIsSubmittingAnn(true);
+    try {
+      const result = await saveAnnouncementAsync({
+        title: annTitle.trim(),
+        content: annContent.trim(),
+        target: annTarget,
+        priority: annPriority,
+        authorName: `${currentUser.name} (مدير المتوسطة)`,
+        authorRole: 'director',
+        badge: annBadge.trim() || 'بلاغ الإدارة',
+        fileName: annUploadedFile?.name,
+        fileSize: annUploadedFile?.size,
+        fileFormat: annUploadedFile?.format,
+        fileDataUrl: annUploadedFile?.dataUrl,
+      });
 
-    setAnnTitle('');
-    setAnnContent('');
-    setAnnUploadedFile(null);
-    if (annFileInputRef.current) annFileInputRef.current.value = '';
+      setFilterTarget('ALL');
+      onRefreshData();
+      setAnnSuccess(
+        result.serverSaved
+          ? 'تم نشر الإعلان وإرساله للتلاميذ والأساتذة بنجاح!'
+          : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
+      );
 
-    setTimeout(() => {
-      setAnnSuccess(null);
-      setActiveTab('announcements');
-    }, 1800);
+      setAnnTitle('');
+      setAnnContent('');
+      setAnnUploadedFile(null);
+      if (annFileInputRef.current) annFileInputRef.current.value = '';
+
+      annTimerRef.current = setTimeout(() => {
+        setAnnSuccess(null);
+        // Only auto-switch if the Director hasn't already started typing a second announcement
+        if (!annDraftRef.current.title.trim() && !annDraftRef.current.content.trim()) {
+          setActiveTab('announcements');
+        }
+      }, 1500);
+    } finally {
+      setIsSubmittingAnn(false);
+    }
   };
 
   const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -846,9 +865,23 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
           </div>
 
           {annSuccess && (
-            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex items-center gap-3 text-sm">
-              <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
-              <span className="font-bold">{annSuccess}</span>
+            <div className="p-4 rounded-2xl bg-emerald-50 border border-emerald-300 text-emerald-900 flex flex-wrap items-center justify-between gap-3 text-sm">
+              <div className="flex items-center gap-2.5">
+                <CheckCircle className="w-5 h-5 text-emerald-600 shrink-0" />
+                <span className="font-bold">{annSuccess}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => {
+                  if (annTimerRef.current) clearTimeout(annTimerRef.current);
+                  setAnnSuccess(null);
+                  setFilterTarget('ALL');
+                  setActiveTab('announcements');
+                }}
+                className="px-3 py-1.5 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold cursor-pointer"
+              >
+                عرض لوحة الإعلانات ({announcements.length})
+              </button>
             </div>
           )}
 
@@ -1054,10 +1087,20 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
             <button
               type="submit"
-              className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2"
+              disabled={isSubmittingAnn}
+              className="w-full py-3.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 disabled:opacity-60 text-white font-bold text-sm shadow-md transition-all flex items-center justify-center gap-2 cursor-pointer"
             >
-              <Send className="w-4 h-4" />
-              <span>نشر الإعلان فورياً</span>
+              {isSubmittingAnn ? (
+                <>
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span>جارٍ نشر الإعلان...</span>
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4" />
+                  <span>نشر الإعلان فورياً</span>
+                </>
+              )}
             </button>
           </form>
         </div>

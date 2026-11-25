@@ -1319,6 +1319,15 @@ app.get('/api/presence', (req, res) => {
 async function startServer() {
   const isProd = process.env.NODE_ENV === 'production';
 
+  app.use((req, res, next) => {
+    if (req.path === '/sw.js' || req.path === '/' || req.path === '/index.html') {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+      res.setHeader('Pragma', 'no-cache');
+      res.setHeader('Expires', '0');
+    }
+    next();
+  });
+
   if (!isProd) {
     console.log('[Server] Starting in development mode with Vite middleware...');
     const vite = await createViteServer({
@@ -1334,6 +1343,7 @@ async function startServer() {
     console.log('[Server] Starting in production mode serving static dist...');
     app.use(express.static(path.resolve(__dirname, 'dist')));
     app.get('*', (req, res) => {
+      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate');
       res.sendFile(path.resolve(__dirname, 'dist', 'index.html'));
     });
   }

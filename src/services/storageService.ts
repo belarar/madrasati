@@ -102,6 +102,12 @@ let cachedSummons: ParentSummon[] | null = null;
 let cachedPeerExchanges: PeerExchangePost[] | null = null;
 let cachedStaffPins: Record<string, StaffPinRecord> | null = null;
 
+// Track confirmed IDs from each backend so neither Firestore nor local server erases the other's announcements
+const confirmedServerAnnIds = new Set<string>();
+const confirmedFirestoreAnnIds = new Set<string>();
+const serverAnnCacheMap = new Map<string, SchoolAnnouncement>();
+const firestoreAnnCacheMap = new Map<string, SchoolAnnouncement>();
+
 // Startup & spam protection for notifications
 const APP_BOOT_MS = Date.now();
 let initialNotifsHydrated = false;
@@ -385,21 +391,45 @@ export function initStorage(): void {
           const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
           const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
           const prev = cachedAnnouncements || [];
-          const liveIds = new Set(liveAnns.map(a => a.id));
-          const pendingLocals = prev.filter(a => pendingSet.has(a.id) && !liveIds.has(a.id) && !deletedSet.has(a.id));
 
-          const merged = [
-            ...pendingLocals,
-            ...liveAnns
-              .filter(ann => !deletedSet.has(ann.id))
-              .map(ann => {
-                const local = prev.find(p => p.id === ann.id);
-                if (local?.fileDataUrl && !ann.fileDataUrl) {
-                  return { ...ann, fileDataUrl: local.fileDataUrl };
-                }
-                return ann;
-              }),
-          ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+          confirmedFirestoreAnnIds.clear();
+          firestoreAnnCacheMap.clear();
+          for (const ann of liveAnns) {
+            if (ann && ann.id && !deletedSet.has(ann.id)) {
+              confirmedFirestoreAnnIds.add(ann.id);
+              firestoreAnnCacheMap.set(ann.id, ann);
+            }
+          }
+
+          const mergedMap = new Map<string, SchoolAnnouncement>();
+
+          // 1. Keep locally pending announcements and confirmed server announcements so Firestore quota/cache never erases them
+          for (const a of prev) {
+            if (!a || !a.id || deletedSet.has(a.id)) continue;
+            if (pendingSet.has(a.id) || confirmedServerAnnIds.has(a.id)) {
+              mergedMap.set(a.id, a);
+            }
+          }
+          for (const [id, sAnn] of serverAnnCacheMap.entries()) {
+            if (!deletedSet.has(id) && !mergedMap.has(id)) {
+              mergedMap.set(id, sAnn);
+            }
+          }
+
+          // 2. Merge live Firestore announcements (preserving local attachment dataUrl if present)
+          for (const ann of liveAnns) {
+            if (!ann || !ann.id || deletedSet.has(ann.id)) continue;
+            const local = prev.find(p => p.id === ann.id) || mergedMap.get(ann.id);
+            const resolvedAnn =
+              local?.fileDataUrl && !ann.fileDataUrl
+                ? { ...ann, fileDataUrl: local.fileDataUrl }
+                : ann;
+            mergedMap.set(ann.id, resolvedAnn);
+          }
+
+          const merged = Array.from(mergedMap.values()).sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
 
           cachedAnnouncements = merged;
           safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(merged));
@@ -1714,24 +1744,41 @@ export async function saveAnnouncementAsync(
 ): Promise<{ announcement: SchoolAnnouncement; serverSaved: boolean; cloudSaved: boolean }> {
   const { newAnn } = prepareAnnouncementLocally(ann);
 
-  const [cloudResult, serverResult] = await Promise.allSettled([
-    saveAnnouncementToFirestore(newAnn),
-    fetch('/api/announcements', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      cache: 'no-store',
-      body: JSON.stringify(newAnn),
-    }),
+  // Never let Firestore SDK retries (e.g. 429 quota exceeded) hang the publish button
+  const cloudPromise = Promise.race<boolean>([
+    saveAnnouncementToFirestore(newAnn).catch(() => false),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2500)),
   ]);
+
+  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+  const fetchTimer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+
+  const serverPromise = fetch('/api/announcements', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
+    body: JSON.stringify(newAnn),
+    ...(controller ? { signal: controller.signal } : {}),
+  }).finally(() => {
+    if (fetchTimer) clearTimeout(fetchTimer);
+  });
+
+  const [cloudResult, serverResult] = await Promise.allSettled([cloudPromise, serverPromise]);
 
   const serverSaved = serverResult.status === 'fulfilled' && serverResult.value.ok;
   const cloudSaved = cloudResult.status === 'fulfilled' && Boolean(cloudResult.value);
 
   if (serverSaved) {
+    confirmedServerAnnIds.add(newAnn.id);
+    serverAnnCacheMap.set(newAnn.id, newAnn);
     const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
     if (pendingSet.delete(newAnn.id)) {
       saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
     }
+  }
+  if (cloudSaved) {
+    confirmedFirestoreAnnIds.add(newAnn.id);
+    firestoreAnnCacheMap.set(newAnn.id, newAnn);
   }
 
   return { announcement: newAnn, serverSaved, cloudSaved };
@@ -1741,9 +1788,16 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
   const { newAnn } = prepareAnnouncementLocally(ann);
 
   // 1. Direct Cloud Database Save (Firebase Firestore)
-  saveAnnouncementToFirestore(newAnn).catch(err => {
-    console.warn('[Firestore] Cloud save announcement error:', err);
-  });
+  saveAnnouncementToFirestore(newAnn)
+    .then(ok => {
+      if (ok) {
+        confirmedFirestoreAnnIds.add(newAnn.id);
+        firestoreAnnCacheMap.set(newAnn.id, newAnn);
+      }
+    })
+    .catch(err => {
+      console.warn('[Firestore] Cloud save announcement error:', err);
+    });
 
   // 2. Local server sync
   fetch('/api/announcements', {
@@ -1754,6 +1808,8 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
   })
     .then(res => {
       if (res.ok) {
+        confirmedServerAnnIds.add(newAnn.id);
+        serverAnnCacheMap.set(newAnn.id, newAnn);
         const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
         if (pendingSet.delete(newAnn.id)) {
           saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
@@ -1770,6 +1826,11 @@ export function deleteAnnouncement(annId: string): void {
   const updated = anns.filter(a => a.id !== annId);
   cachedAnnouncements = updated;
   safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
+
+  confirmedServerAnnIds.delete(annId);
+  confirmedFirestoreAnnIds.delete(annId);
+  serverAnnCacheMap.delete(annId);
+  firestoreAnnCacheMap.delete(annId);
 
   const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
   deletedSet.add(annId);
@@ -2864,13 +2925,27 @@ export async function syncWithServer(): Promise<void> {
       if (Array.isArray(data.announcements)) {
         const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
         if (Array.isArray(data.deletedAnnouncementIds)) {
-          data.deletedAnnouncementIds.forEach((id: string) => deletedSet.add(id));
+          data.deletedAnnouncementIds.forEach((id: string) => {
+            deletedSet.add(id);
+            confirmedServerAnnIds.delete(id);
+            serverAnnCacheMap.delete(id);
+          });
           saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
         }
 
         const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
         const currentAnns = getAnnouncements();
-        const serverAnnIds = new Set(data.announcements.map((a: SchoolAnnouncement) => a.id));
+        const serverAnnIds = new Set<string>();
+
+        confirmedServerAnnIds.clear();
+        serverAnnCacheMap.clear();
+        for (const sAnn of data.announcements as SchoolAnnouncement[]) {
+          if (sAnn && sAnn.id && !deletedSet.has(sAnn.id)) {
+            serverAnnIds.add(sAnn.id);
+            confirmedServerAnnIds.add(sAnn.id);
+            serverAnnCacheMap.set(sAnn.id, sAnn);
+          }
+        }
 
         // Clear pending flags for announcements confirmed on server
         let pendingChanged = false;
@@ -2884,10 +2959,21 @@ export async function syncWithServer(): Promise<void> {
           saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
         }
 
-        // Only re-push locally created pending announcements not deleted on server
+        // Re-push locally created pending announcements OR Firestore-only announcements not yet on server and not deleted
         const unsyncedAnns = currentAnns.filter(
-          a => pendingSet.has(a.id) && !serverAnnIds.has(a.id) && !deletedSet.has(a.id)
+          a =>
+            a &&
+            a.id &&
+            !serverAnnIds.has(a.id) &&
+            !deletedSet.has(a.id) &&
+            (pendingSet.has(a.id) || confirmedFirestoreAnnIds.has(a.id))
         );
+        for (const [fId, fAnn] of firestoreAnnCacheMap.entries()) {
+          if (!serverAnnIds.has(fId) && !deletedSet.has(fId) && !unsyncedAnns.some(u => u.id === fId)) {
+            unsyncedAnns.push(fAnn);
+          }
+        }
+
         for (const un of unsyncedAnns) {
           fetch('/api/announcements', {
             method: 'POST',
@@ -2897,6 +2983,8 @@ export async function syncWithServer(): Promise<void> {
           })
             .then(res => {
               if (res.ok) {
+                confirmedServerAnnIds.add(un.id);
+                serverAnnCacheMap.set(un.id, un);
                 const pSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
                 if (pSet.delete(un.id)) {
                   saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pSet);
@@ -2906,18 +2994,23 @@ export async function syncWithServer(): Promise<void> {
             .catch(() => {});
         }
 
-        const mergedAnns = [
-          ...unsyncedAnns,
-          ...data.announcements
-            .filter((sAnn: SchoolAnnouncement) => !deletedSet.has(sAnn.id))
-            .map((sAnn: SchoolAnnouncement) => {
-              const localMatch = currentAnns.find(l => l.id === sAnn.id);
-              if (localMatch?.fileDataUrl && !sAnn.fileDataUrl) {
-                return { ...sAnn, fileDataUrl: localMatch.fileDataUrl };
-              }
-              return sAnn;
-            }),
-        ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+        const mergedMap = new Map<string, SchoolAnnouncement>();
+        for (const un of unsyncedAnns) {
+          mergedMap.set(un.id, un);
+        }
+        for (const sAnn of data.announcements as SchoolAnnouncement[]) {
+          if (!sAnn || !sAnn.id || deletedSet.has(sAnn.id)) continue;
+          const localMatch = currentAnns.find(l => l.id === sAnn.id);
+          if (localMatch?.fileDataUrl && !sAnn.fileDataUrl) {
+            mergedMap.set(sAnn.id, { ...sAnn, fileDataUrl: localMatch.fileDataUrl });
+          } else {
+            mergedMap.set(sAnn.id, sAnn);
+          }
+        }
+
+        const mergedAnns = Array.from(mergedMap.values()).sort(
+          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+        );
 
         const prevAnnsStr = JSON.stringify(currentAnns.map(a => ({ id: a.id, title: a.title, content: a.content })));
         const newAnnsStr = JSON.stringify(mergedAnns.map(a => ({ id: a.id, title: a.title, content: a.content })));
@@ -3175,7 +3268,8 @@ function maybeAlertSingleFreshNotification(candidates: AppNotification[]): void 
   // Ignore startup grace period so opening the app never triggers noisy sound/popups
   if (Date.now() - APP_BOOT_MS < 4000) return;
 
-  const tenMinutesAgo = Date.now() - 10 * 60 * 1000;
+  const adjustedNow = Date.now() + serverClockOffsetMs;
+  const tenMinutesAgo = adjustedNow - 10 * 60 * 1000;
   const freshRelevant = candidates
     .filter(n => {
       if (sessionAlertedNotifIds.has(n.id)) return false;
