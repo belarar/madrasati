@@ -38,11 +38,12 @@ import {
   getPendingResetRequestsCount,
   fetchPasswordResetRequestsFromServer,
   isPresenceOnline,
-  saveAnnouncement,
+  saveAnnouncementAsync,
   saveDocument,
   subscribeToLivePresence,
   syncWithServer,
 } from '../../services/storageService';
+import { isFirestoreQuotaExceeded } from '../../services/firestoreService';
 import {
   AnnouncementPriority,
   AnnouncementTarget,
@@ -133,9 +134,16 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
   // Pending password reset requests counter (Requiring director approval)
   const [pendingResetCount, setPendingResetCount] = useState<number>(() => getPendingResetRequestsCount());
+  const [cloudQuotaReached, setCloudQuotaReached] = useState<boolean>(() => isFirestoreQuotaExceeded());
 
   React.useEffect(() => {
-    fetchPasswordResetRequestsFromServer().then(() => {
+    const handleQuotaEvent = () => setCloudQuotaReached(true);
+    window.addEventListener('firestore-quota-exceeded', handleQuotaEvent);
+    return () => window.removeEventListener('firestore-quota-exceeded', handleQuotaEvent);
+  }, []);
+
+  React.useEffect(() => {
+    fetchPasswordResetRequestsFromServer(false).then(() => {
       setPendingResetCount(getPendingResetRequestsCount());
     });
 
@@ -145,10 +153,10 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
     window.addEventListener('password-requests-updated', handleReqUpdate);
     const interval = setInterval(() => {
-      fetchPasswordResetRequestsFromServer().then(() => {
+      fetchPasswordResetRequestsFromServer(false).then(() => {
         setPendingResetCount(getPendingResetRequestsCount());
       });
-    }, 2500);
+    }, 15_000);
 
     return () => {
       window.removeEventListener('password-requests-updated', handleReqUpdate);
@@ -163,7 +171,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     });
     const expiryTick = setInterval(() => {
       setPresenceNowTs(Date.now());
-    }, 10_000);
+    }, 5_000);
 
     return () => {
       unsubscribe();
@@ -236,11 +244,11 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     }
   };
 
-  const handleCreateAnnouncement = (e: React.FormEvent) => {
+  const handleCreateAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!annTitle.trim() || !annContent.trim()) return;
 
-    saveAnnouncement({
+    const result = await saveAnnouncementAsync({
       title: annTitle.trim(),
       content: annContent.trim(),
       target: annTarget,
@@ -255,7 +263,11 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     });
 
     onRefreshData();
-    setAnnSuccess('تم نشر الإعلان مع المرفق بنجاح وحفظه في قاعدة البيانات!');
+    setAnnSuccess(
+      result.serverSaved
+        ? 'تم نشر الإعلان وإرساله للتلاميذ والأساتذة بنجاح!'
+        : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
+    );
 
     setAnnTitle('');
     setAnnContent('');
@@ -542,6 +554,20 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
           </div>
         </div>
       </div>
+
+      {cloudQuotaReached && (
+        <div className="bg-amber-50 border border-amber-300 rounded-2xl p-4 flex items-start gap-3 text-xs sm:text-sm text-amber-950 shadow-2xs">
+          <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+          <div className="space-y-1">
+            <p className="font-bold">
+              تنبيه: تم بلوغ الحد اليومي المجاني لقراءات قاعدة البيانات السحابية (Firestore) لهذا اليوم.
+            </p>
+            <p className="text-xs text-amber-800">
+              المزامنة المباشرة عبر خادم المنصة تعمل بشكل طبيعي، وتُعاد مزامنة السحابة تلقائياً عند تجدد الحصة اليومية.
+            </p>
+          </div>
+        </div>
+      )}
 
       {/* Security Alert: Pending Password Reset Requests */}
       {pendingResetCount > 0 && (

@@ -137,47 +137,60 @@ export default function App() {
   }, []);
 
   const prevPresenceIdRef = useRef<string | null>(null);
+  const currentUserId = currentUser?.identifier || null;
+  const currentUserRef = useRef<UserProfile | null>(currentUser);
+  currentUserRef.current = currentUser;
 
   useEffect(() => {
     const prevId = prevPresenceIdRef.current;
-    const nextId = currentUser?.identifier || null;
+    const nextId = currentUserId;
 
     if (prevId && prevId !== nextId) {
       markUserOffline(prevId);
     }
     prevPresenceIdRef.current = nextId;
 
-    if (!currentUser) return;
+    const activeUser = currentUserRef.current;
+    if (!activeUser) return;
 
-    sendPresenceHeartbeat(currentUser);
+    sendPresenceHeartbeat(activeUser);
 
     const heartbeatInterval = setInterval(() => {
-      if (typeof document === 'undefined' || !document.hidden) {
-        sendPresenceHeartbeat(currentUser);
+      const latestUser = currentUserRef.current;
+      if (latestUser && (typeof document === 'undefined' || !document.hidden)) {
+        sendPresenceHeartbeat(latestUser);
       }
-    }, 20_000);
+    }, 15_000);
 
-    const handleVisibilityChange = () => {
-      if (!document.hidden) {
-        sendPresenceHeartbeat(currentUser);
+    const handleResumeHeartbeat = () => {
+      const latestUser = currentUserRef.current;
+      if (latestUser && (typeof document === 'undefined' || !document.hidden)) {
+        sendPresenceHeartbeat(latestUser);
       }
     };
 
     const handlePageUnload = () => {
-      markUserOffline(currentUser.identifier, true);
+      const latestUser = currentUserRef.current;
+      if (latestUser) {
+        markUserOffline(latestUser.identifier, true);
+      }
     };
 
-    document.addEventListener('visibilitychange', handleVisibilityChange);
+    document.addEventListener('visibilitychange', handleResumeHeartbeat);
+    window.addEventListener('focus', handleResumeHeartbeat);
+    window.addEventListener('pageshow', handleResumeHeartbeat);
+    window.addEventListener('online', handleResumeHeartbeat);
     window.addEventListener('beforeunload', handlePageUnload);
-    window.addEventListener('pagehide', handlePageUnload);
 
     return () => {
       clearInterval(heartbeatInterval);
-      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      document.removeEventListener('visibilitychange', handleResumeHeartbeat);
+      window.removeEventListener('focus', handleResumeHeartbeat);
+      window.removeEventListener('pageshow', handleResumeHeartbeat);
+      window.removeEventListener('online', handleResumeHeartbeat);
       window.removeEventListener('beforeunload', handlePageUnload);
-      window.removeEventListener('pagehide', handlePageUnload);
     };
-  }, [currentUser]);
+  }, [currentUserId, currentUser?.name, currentUser?.classId, currentUser?.role]);
 
   const handleCopyCleanLink = () => {
     const cleanUrl = window.location.origin;
@@ -189,6 +202,7 @@ export default function App() {
   const handleSelectUser = (user: UserProfile) => {
     setCurrentUser(user);
     setUser(user);
+    sendPresenceHeartbeat(user);
     refreshAllData();
     syncWithServer().then(() => refreshAllData()).catch(() => {});
   };

@@ -77,7 +77,7 @@ export const StaffAccountsManager: React.FC = () => {
   };
 
   useEffect(() => {
-    fetchPasswordResetRequestsFromServer().then(data => {
+    fetchPasswordResetRequestsFromServer(false).then(data => {
       if (data) setResetRequests(data);
       setStaffList(getOfficialStaffAccountList());
     });
@@ -89,13 +89,13 @@ export const StaffAccountsManager: React.FC = () => {
 
     window.addEventListener('password-requests-updated', handleReqUpdate);
     const interval = setInterval(() => {
-      fetchPasswordResetRequestsFromServer().then(data => {
+      fetchPasswordResetRequestsFromServer(false).then(data => {
         if (data) {
           setResetRequests(data);
           setStaffList(getOfficialStaffAccountList());
         }
       });
-    }, 2500);
+    }, 15_000);
 
     return () => {
       window.removeEventListener('password-requests-updated', handleReqUpdate);

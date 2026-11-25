@@ -49,6 +49,7 @@ import {
   initPresenceRealtimeSync,
   initPrivateConversationsSync,
   initPrivateMessagesSync,
+  isFirestoreQuotaExceeded,
   fetchPasswordResetRequestsFromFirestore,
   markPresenceOfflineInFirestore,
   rejectPasswordResetRequestInFirestore,
@@ -82,6 +83,8 @@ export const STORAGE_KEYS = {
   PRIVATE_CONVERSATIONS: 'ben_naama_private_conversations',
   PRIVATE_MESSAGES: 'ben_naama_private_messages',
   PASSWORD_RESET_REQUESTS: 'ben_naama_password_reset_requests',
+  DELETED_ANNOUNCEMENTS: 'ben_naama_deleted_announcements',
+  PENDING_ANNOUNCEMENTS: 'ben_naama_pending_announcements',
 };
 
 const CLEAN_VERSION_KEY = 'ben_naama_strict_official_v16';
@@ -241,6 +244,56 @@ function mergePasswordResetRequests(
   return merged;
 }
 
+function getIdSetFromStorage(key: string): Set<string> {
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return new Set<string>();
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? new Set<string>(parsed.filter(Boolean)) : new Set<string>();
+  } catch {
+    return new Set<string>();
+  }
+}
+
+function saveIdSetToStorage(key: string, set: Set<string>): void {
+  try {
+    localStorage.setItem(key, JSON.stringify(Array.from(set).slice(0, 200)));
+  } catch {}
+}
+
+function mergeNotificationsLists(
+  baseList: AppNotification[],
+  incomingList: AppNotification[]
+): AppNotification[] {
+  const map = new Map<string, AppNotification>();
+  const absorb = (item: AppNotification) => {
+    if (!item || !item.id) return;
+    const prev = map.get(item.id);
+    if (!prev) {
+      map.set(item.id, {
+        ...item,
+        readBy: Array.isArray(item.readBy) ? Array.from(new Set(item.readBy)) : [],
+      });
+      return;
+    }
+    const mergedReadBy = Array.from(
+      new Set([...(Array.isArray(prev.readBy) ? prev.readBy : []), ...(Array.isArray(item.readBy) ? item.readBy : [])])
+    );
+    map.set(item.id, {
+      ...prev,
+      ...item,
+      readBy: mergedReadBy,
+    });
+  };
+
+  baseList.forEach(absorb);
+  incomingList.forEach(absorb);
+
+  return Array.from(map.values())
+    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime())
+    .slice(0, 100);
+}
+
 // Initialize Storage with clean baseline & start cross-device sync
 export function initStorage(): void {
   if (typeof window === 'undefined') return;
@@ -329,14 +382,25 @@ export function initStorage(): void {
       },
       onAnnouncements: (liveAnns) => {
         if (Array.isArray(liveAnns)) {
+          const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
+          const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
           const prev = cachedAnnouncements || [];
-          const merged = liveAnns.map(ann => {
-            const local = prev.find(p => p.id === ann.id);
-            if (local?.fileDataUrl && !ann.fileDataUrl) {
-              return { ...ann, fileDataUrl: local.fileDataUrl };
-            }
-            return ann;
-          });
+          const liveIds = new Set(liveAnns.map(a => a.id));
+          const pendingLocals = prev.filter(a => pendingSet.has(a.id) && !liveIds.has(a.id) && !deletedSet.has(a.id));
+
+          const merged = [
+            ...pendingLocals,
+            ...liveAnns
+              .filter(ann => !deletedSet.has(ann.id))
+              .map(ann => {
+                const local = prev.find(p => p.id === ann.id);
+                if (local?.fileDataUrl && !ann.fileDataUrl) {
+                  return { ...ann, fileDataUrl: local.fileDataUrl };
+                }
+                return ann;
+              }),
+          ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
           cachedAnnouncements = merged;
           safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(merged));
           window.dispatchEvent(new Event('announcements-change'));
@@ -372,12 +436,12 @@ export function initStorage(): void {
       },
       onNotifications: (liveNotifs) => {
         if (Array.isArray(liveNotifs)) {
-          const rawCurrent = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-          const currentNotifs: AppNotification[] = rawCurrent ? JSON.parse(rawCurrent) : [];
+          const currentNotifs = getNotifications();
           const currentIds = new Set(currentNotifs.map(n => n.id));
           const brandNew = liveNotifs.filter(n => !currentIds.has(n.id));
+          const mergedNotifs = mergeNotificationsLists(currentNotifs, liveNotifs);
 
-          safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(liveNotifs));
+          safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(mergedNotifs));
           window.dispatchEvent(new Event('notifications-change'));
 
           // Only alert once for the single newest genuinely fresh notification relevant to logged-in user (no startup/archive spam)
@@ -1188,8 +1252,8 @@ export async function authenticateUserAsync(
           upsertStoredStaffPin(cleanId, rec.pin, rec.updatedAt, 'firestore');
         }
       }),
-      fetchPasswordResetRequestsFromServer(),
-      fetch('/api/sync')
+      fetchPasswordResetRequestsFromServer(!isFirestoreQuotaExceeded()),
+      fetch('/api/sync', { cache: 'no-store' })
         .then(r => (r.ok ? r.json() : null))
         .then(data => {
           if (!data || typeof data !== 'object') return;
@@ -1566,14 +1630,20 @@ export async function downloadAnnouncementAttachment(ann: SchoolAnnouncement): P
 
 // Announcements
 export function getAnnouncements(): SchoolAnnouncement[] {
+  if (cachedAnnouncements && cachedAnnouncements.length > 0) {
+    return cachedAnnouncements;
+  }
   try {
     if (typeof window !== 'undefined') {
       const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
       if (raw) {
         const parsed = JSON.parse(raw);
         if (Array.isArray(parsed)) {
-          cachedAnnouncements = parsed;
-          return parsed;
+          const sorted = [...parsed].sort(
+            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+          );
+          cachedAnnouncements = sorted;
+          return sorted;
         }
       }
     }
@@ -1583,14 +1653,27 @@ export function getAnnouncements(): SchoolAnnouncement[] {
   return cachedAnnouncements && cachedAnnouncements.length > 0 ? cachedAnnouncements : INITIAL_ANNOUNCEMENTS;
 }
 
-export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>): SchoolAnnouncement {
+function prepareAnnouncementLocally(
+  ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>
+): { newAnn: SchoolAnnouncement; annNotif: AppNotification } {
   const anns = getAnnouncements();
+  const id = `ann-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`;
+  const createdAt = new Date().toISOString();
   const newAnn: SchoolAnnouncement = {
     ...ann,
-    id: 'ann-' + Date.now(),
-    createdAt: new Date().toISOString(),
+    id,
+    createdAt,
     views: 1,
   };
+
+  const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+  pendingSet.add(newAnn.id);
+  saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
+
+  const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
+  if (deletedSet.delete(newAnn.id)) {
+    saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
+  }
 
   const updated = [newAnn, ...anns.filter(a => a.id !== newAnn.id)];
   cachedAnnouncements = updated;
@@ -1608,20 +1691,54 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
     ).catch(() => {});
   }
 
-  // Auto-generate notification for target recipients without disturbing the author
+  // Deterministic notification ID so local, server, and Firestore never duplicate
   const annNotif: AppNotification = {
-    id: 'notif-ann-' + Date.now(),
+    id: `notif-ann-${newAnn.id}`,
     type: 'announcement',
     title: `إعلان رسمي جديد: ${newAnn.title}`,
     message: (newAnn.content || '').slice(0, 140) + ((newAnn.content || '').length > 140 ? '...' : ''),
     targetRole: newAnn.target || 'all',
     sourceAuthorName: newAnn.authorName || 'إدارة المؤسسة',
     sourceId: newAnn.id,
-    createdAt: new Date().toISOString(),
+    createdAt,
     readBy: [],
   };
   sessionAlertedNotifIds.add(annNotif.id);
   addNotificationLocally(annNotif, false);
+
+  return { newAnn, annNotif };
+}
+
+export async function saveAnnouncementAsync(
+  ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>
+): Promise<{ announcement: SchoolAnnouncement; serverSaved: boolean; cloudSaved: boolean }> {
+  const { newAnn } = prepareAnnouncementLocally(ann);
+
+  const [cloudResult, serverResult] = await Promise.allSettled([
+    saveAnnouncementToFirestore(newAnn),
+    fetch('/api/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      body: JSON.stringify(newAnn),
+    }),
+  ]);
+
+  const serverSaved = serverResult.status === 'fulfilled' && serverResult.value.ok;
+  const cloudSaved = cloudResult.status === 'fulfilled' && Boolean(cloudResult.value);
+
+  if (serverSaved) {
+    const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+    if (pendingSet.delete(newAnn.id)) {
+      saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
+    }
+  }
+
+  return { announcement: newAnn, serverSaved, cloudSaved };
+}
+
+export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>): SchoolAnnouncement {
+  const { newAnn } = prepareAnnouncementLocally(ann);
 
   // 1. Direct Cloud Database Save (Firebase Firestore)
   saveAnnouncementToFirestore(newAnn).catch(err => {
@@ -1632,8 +1749,18 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
   fetch('/api/announcements', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
     body: JSON.stringify(newAnn),
-  }).catch(() => {});
+  })
+    .then(res => {
+      if (res.ok) {
+        const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+        if (pendingSet.delete(newAnn.id)) {
+          saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
+        }
+      }
+    })
+    .catch(() => {});
 
   return newAnn;
 }
@@ -1643,6 +1770,16 @@ export function deleteAnnouncement(annId: string): void {
   const updated = anns.filter(a => a.id !== annId);
   cachedAnnouncements = updated;
   safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
+
+  const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
+  deletedSet.add(annId);
+  saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
+
+  const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+  if (pendingSet.delete(annId)) {
+    saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
+  }
+
   window.dispatchEvent(new Event('announcements-change'));
 
   // 1. Direct Cloud Database Delete
@@ -1653,6 +1790,7 @@ export function deleteAnnouncement(annId: string): void {
   // 2. Local server delete
   fetch('/api/announcements/' + encodeURIComponent(annId), {
     method: 'DELETE',
+    cache: 'no-store',
   }).catch(() => {});
 }
 
@@ -2255,12 +2393,12 @@ export function getPasswordResetRequests(): PasswordResetRequest[] {
   }
 }
 
-export async function fetchPasswordResetRequestsFromServer(): Promise<PasswordResetRequest[]> {
+export async function fetchPasswordResetRequestsFromServer(includeCloud = false): Promise<PasswordResetRequest[]> {
   let merged = getPasswordResetRequests();
 
   // 1. Fetch from Express backend and merge safely (resolved beats pending)
   try {
-    const res = await fetch('/api/password-reset-requests');
+    const res = await fetch('/api/password-reset-requests', { cache: 'no-store' });
     if (res.ok) {
       const serverList = await res.json();
       if (Array.isArray(serverList)) {
@@ -2269,24 +2407,25 @@ export async function fetchPasswordResetRequestsFromServer(): Promise<PasswordRe
     }
   } catch {}
 
-  // 2. Fetch from Firestore (cloud database) and merge safely
-  try {
-    const firestoreList = await fetchPasswordResetRequestsFromFirestore();
-    if (Array.isArray(firestoreList)) {
-      merged = mergePasswordResetRequests(merged, firestoreList as PasswordResetRequest[]);
-    }
-  } catch {}
-
-  // 3. Also sync staff pins from Firestore so Director & Staff always see latest activated pins
-  try {
-    const cloudPins = await fetchAllStaffPinsFromFirestore();
-    for (const [id, rec] of Object.entries(cloudPins)) {
-      if (rec && rec.pin) {
-        upsertStoredStaffPin(id, rec.pin, rec.updatedAt, 'firestore');
+  // 2. Only hit Firestore on explicit demand (not in polling intervals) so we never exhaust Firestore read quota
+  if (includeCloud && !isFirestoreQuotaExceeded()) {
+    try {
+      const firestoreList = await fetchPasswordResetRequestsFromFirestore();
+      if (Array.isArray(firestoreList)) {
+        merged = mergePasswordResetRequests(merged, firestoreList as PasswordResetRequest[]);
       }
-    }
-    merged = mergePasswordResetRequests(merged, []);
-  } catch {}
+    } catch {}
+
+    try {
+      const cloudPins = await fetchAllStaffPinsFromFirestore();
+      for (const [id, rec] of Object.entries(cloudPins)) {
+        if (rec && rec.pin) {
+          upsertStoredStaffPin(id, rec.pin, rec.updatedAt, 'firestore');
+        }
+      }
+      merged = mergePasswordResetRequests(merged, []);
+    } catch {}
+  }
 
   safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(merged));
   window.dispatchEvent(new CustomEvent('password-requests-updated'));
@@ -2663,7 +2802,7 @@ export async function syncWithServer(): Promise<void> {
   updateSyncStatus('syncing');
 
   try {
-    const syncRes = await fetch('/api/sync');
+    const syncRes = await fetch('/api/sync', { cache: 'no-store' });
 
     if (syncRes.ok) {
       lastSuccessfulSyncTime = Date.now();
@@ -2674,6 +2813,13 @@ export async function syncWithServer(): Promise<void> {
       }
 
       const data = await syncRes.json();
+
+      if (data.serverTime) {
+        const srvMs = new Date(data.serverTime).getTime();
+        if (!Number.isNaN(srvMs)) {
+          serverClockOffsetMs = srvMs - Date.now();
+        }
+      }
 
       // 1. Documents: Intelligently merge server documents with any local docs
       if (Array.isArray(data.documents)) {
@@ -2714,22 +2860,68 @@ export async function syncWithServer(): Promise<void> {
         }
       }
 
-      // 2. Announcements
+      // 2. Announcements (merge cleanly without resurrecting deleted announcements)
       if (Array.isArray(data.announcements)) {
+        const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
+        if (Array.isArray(data.deletedAnnouncementIds)) {
+          data.deletedAnnouncementIds.forEach((id: string) => deletedSet.add(id));
+          saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
+        }
+
+        const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
         const currentAnns = getAnnouncements();
         const serverAnnIds = new Set(data.announcements.map((a: SchoolAnnouncement) => a.id));
-        const unsyncedAnns = currentAnns.filter(a => !serverAnnIds.has(a.id));
+
+        // Clear pending flags for announcements confirmed on server
+        let pendingChanged = false;
+        for (const pId of Array.from(pendingSet)) {
+          if (serverAnnIds.has(pId)) {
+            pendingSet.delete(pId);
+            pendingChanged = true;
+          }
+        }
+        if (pendingChanged) {
+          saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
+        }
+
+        // Only re-push locally created pending announcements not deleted on server
+        const unsyncedAnns = currentAnns.filter(
+          a => pendingSet.has(a.id) && !serverAnnIds.has(a.id) && !deletedSet.has(a.id)
+        );
         for (const un of unsyncedAnns) {
           fetch('/api/announcements', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            cache: 'no-store',
             body: JSON.stringify(un),
-          }).catch(() => {});
+          })
+            .then(res => {
+              if (res.ok) {
+                const pSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+                if (pSet.delete(un.id)) {
+                  saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pSet);
+                }
+              }
+            })
+            .catch(() => {});
         }
-        const mergedAnns = [...unsyncedAnns, ...data.announcements];
-        const prevAnnsStr = JSON.stringify(currentAnns.map(a => a.id));
-        const newAnnsStr = JSON.stringify(mergedAnns.map(a => a.id));
-        if (prevAnnsStr !== newAnnsStr || !cachedAnnouncements) {
+
+        const mergedAnns = [
+          ...unsyncedAnns,
+          ...data.announcements
+            .filter((sAnn: SchoolAnnouncement) => !deletedSet.has(sAnn.id))
+            .map((sAnn: SchoolAnnouncement) => {
+              const localMatch = currentAnns.find(l => l.id === sAnn.id);
+              if (localMatch?.fileDataUrl && !sAnn.fileDataUrl) {
+                return { ...sAnn, fileDataUrl: localMatch.fileDataUrl };
+              }
+              return sAnn;
+            }),
+        ].sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
+
+        const prevAnnsStr = JSON.stringify(currentAnns.map(a => ({ id: a.id, title: a.title, content: a.content })));
+        const newAnnsStr = JSON.stringify(mergedAnns.map(a => ({ id: a.id, title: a.title, content: a.content })));
+        if (prevAnnsStr !== newAnnsStr || !cachedAnnouncements || cachedAnnouncements.length !== mergedAnns.length) {
           cachedAnnouncements = mergedAnns;
           safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(mergedAnns));
           window.dispatchEvent(new Event('announcements-change'));
@@ -2858,7 +3050,7 @@ export async function syncWithServer(): Promise<void> {
       }
     }
 
-    // 6. User Notifications
+    // 6. User Notifications (Merge instead of overwriting so local/Firestore/Server stay in sync)
     const user = getCurrentUser();
     const query = new URLSearchParams();
     if (user) {
@@ -2866,19 +3058,21 @@ export async function syncWithServer(): Promise<void> {
       query.set('role', user.role);
       if (user.classId) query.set('classId', user.classId);
     }
-    const notifsRes = await fetch(`/api/notifications?${query.toString()}`);
+    const notifsRes = await fetch(`/api/notifications?${query.toString()}`, { cache: 'no-store' });
     if (notifsRes.ok) {
       const serverNotifs: AppNotification[] = await notifsRes.json();
-      const rawCurrent = localStorage.getItem(STORAGE_KEYS.NOTIFICATIONS);
-      const currentNotifs: AppNotification[] = rawCurrent ? JSON.parse(rawCurrent) : [];
-      const currentIds = new Set(currentNotifs.map(n => n.id));
-      const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
+      if (Array.isArray(serverNotifs)) {
+        const currentNotifs = getNotifications();
+        const currentIds = new Set(currentNotifs.map(n => n.id));
+        const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
+        const mergedNotifs = mergeNotificationsLists(currentNotifs, serverNotifs);
 
-      safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(serverNotifs));
-      window.dispatchEvent(new Event('notifications-change'));
+        safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(mergedNotifs));
+        window.dispatchEvent(new Event('notifications-change'));
 
-      maybeAlertSingleFreshNotification(brandNew);
-      initialNotifsHydrated = true;
+        maybeAlertSingleFreshNotification(brandNew);
+        initialNotifsHydrated = true;
+      }
     }
 
     // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
@@ -3331,7 +3525,13 @@ export async function deleteSupervisedMessage(conversationId: string, messageId:
 
 // ================= تتبع المتصلين الآن في المنصة (التلاميذ والأساتذة) =================
 
-export const PRESENCE_ONLINE_WINDOW_MS = 65_000;
+export const PRESENCE_ONLINE_WINDOW_MS = 120_000;
+
+let serverClockOffsetMs = 0;
+
+export function getServerAlignedNowMs(): number {
+  return Date.now() + serverClockOffsetMs;
+}
 
 const presenceLocalCache = new Map<string, UserPresenceRecord>();
 
@@ -3342,12 +3542,15 @@ function normalizePresenceId(identifier?: string): string {
 export function isPresenceOnline(record?: UserPresenceRecord | null, now = Date.now()): boolean {
   if (!record || !record.isOnline) return false;
   if (!record.lastSeen || typeof record.lastSeen !== 'number') return false;
-  return now - record.lastSeen <= PRESENCE_ONLINE_WINDOW_MS;
+  const diff = now - record.lastSeen;
+  // Allow slight future skew up to 5 minutes from remote clocks, and up to 120s age
+  return diff <= PRESENCE_ONLINE_WINDOW_MS && diff >= -300_000;
 }
 
 export async function sendPresenceHeartbeat(user: UserProfile | null): Promise<void> {
   if (!user || !user.identifier) return;
 
+  const localNow = Date.now();
   const record: UserPresenceRecord = {
     identifier: user.identifier,
     name: user.name,
@@ -3355,21 +3558,36 @@ export async function sendPresenceHeartbeat(user: UserProfile | null): Promise<v
     title: user.title,
     classId: user.classId,
     className: user.className,
-    lastSeen: Date.now(),
+    lastSeen: localNow,
     isOnline: true,
   };
 
   presenceLocalCache.set(normalizePresenceId(user.identifier), record);
   window.dispatchEvent(new Event('presence-updated'));
 
-  savePresenceHeartbeatToFirestore(record).catch(() => {});
+  savePresenceHeartbeatToFirestore({
+    ...record,
+    lastSeen: getServerAlignedNowMs(),
+  }).catch(() => {});
 
   fetch('/api/presence/heartbeat', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
     body: JSON.stringify(record),
     keepalive: true,
-  }).catch(() => {});
+  })
+    .then(async res => {
+      if (res.ok) {
+        try {
+          const data = await res.json();
+          if (typeof data?.serverTime === 'number') {
+            serverClockOffsetMs = data.serverTime - Date.now();
+          }
+        } catch {}
+      }
+    })
+    .catch(() => {});
 }
 
 export function markUserOffline(identifier?: string, useBeacon = false): void {
@@ -3401,6 +3619,7 @@ export function markUserOffline(identifier?: string, useBeacon = false): void {
   fetch('/api/presence/offline', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    cache: 'no-store',
     body: JSON.stringify({ identifier }),
     keepalive: true,
   }).catch(() => {});
@@ -3419,7 +3638,19 @@ export function subscribeToLivePresence(
         const key = normalizePresenceId(rec.identifier);
         if (!key) continue;
         const prev = merged.get(key);
-        if (!prev || rec.lastSeen >= prev.lastSeen) {
+        if (!prev) {
+          merged.set(key, rec);
+          continue;
+        }
+        // Prefer an active online heartbeat over a slightly newer/skewed offline record unless offline is significantly newer
+        if (prev.isOnline && !rec.isOnline && rec.lastSeen - prev.lastSeen < 15_000) {
+          continue;
+        }
+        if (rec.isOnline && !prev.isOnline && prev.lastSeen - rec.lastSeen < 15_000) {
+          merged.set(key, rec);
+          continue;
+        }
+        if (rec.lastSeen >= prev.lastSeen) {
           merged.set(key, rec);
         }
       }
@@ -3434,11 +3665,20 @@ export function subscribeToLivePresence(
 
   const fetchServerPresence = async () => {
     try {
-      const res = await fetch('/api/presence');
+      const res = await fetch('/api/presence', { cache: 'no-store' });
       if (!res.ok) return;
       const data = await res.json();
       if (Array.isArray(data?.records)) {
-        serverRecords = data.records;
+        const now = Date.now();
+        const serverNow = typeof data.serverTime === 'number' ? data.serverTime : now;
+        const offset = serverNow - now;
+        serverClockOffsetMs = offset;
+
+        // Normalize server timestamps into local browser time so client/phone clock skew never drops online users
+        serverRecords = data.records.map((rec: UserPresenceRecord) => ({
+          ...rec,
+          lastSeen: Math.min(now, rec.lastSeen - offset),
+        }));
         emitMerged();
       }
     } catch {
@@ -3449,7 +3689,12 @@ export function subscribeToLivePresence(
   let unsubFirestore: (() => void) | null = null;
   try {
     unsubFirestore = initPresenceRealtimeSync(records => {
-      firestoreRecords = records;
+      const now = Date.now();
+      firestoreRecords = records.map(rec => ({
+        ...rec,
+        // Guard against remote clock skew when merging Firestore timestamps into local timeline
+        lastSeen: Math.min(now, rec.lastSeen - serverClockOffsetMs),
+      }));
       emitMerged();
     });
   } catch {
@@ -3460,7 +3705,7 @@ export function subscribeToLivePresence(
   window.addEventListener('presence-updated', handleLocalPresence);
 
   fetchServerPresence();
-  const pollInterval = setInterval(fetchServerPresence, 12_000);
+  const pollInterval = setInterval(fetchServerPresence, 5_000);
 
   return () => {
     if (unsubFirestore) unsubFirestore();

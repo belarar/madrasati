@@ -1,7 +1,6 @@
 // Service Worker for Ben Naama School Digital Platform
-const CACHE_NAME = 'ben-naama-v3';
+const CACHE_NAME = 'ben-naama-v4';
 const ASSETS_TO_CACHE = [
-  '/',
   '/manifest.json',
   '/favicon.ico',
   '/pwa-192x192.png',
@@ -12,7 +11,7 @@ const ASSETS_TO_CACHE = [
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
-      return cache.addAll(ASSETS_TO_CACHE);
+      return cache.addAll(ASSETS_TO_CACHE).catch(() => {});
     })
   );
   self.skipWaiting();
@@ -33,44 +32,48 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Network first for API calls, Stale-while-revalidate for static assets
+// Network-first for HTML, JS, CSS, and APIs so mobile users always get fresh code & live announcements
 self.addEventListener('fetch', (event) => {
-  const url = new URL(event.request.url);
+  if (event.request.method !== 'GET') return;
 
-  // Always go to network for API calls to ensure live multi-device data
+  const url = new URL(event.request.url);
+  if (url.origin !== self.location.origin) return;
+
+  // Never cache API calls
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(fetch(event.request));
+    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 
-  // Navigation requests (HTML)
-  if (event.request.mode === 'navigate') {
+  // Only use Cache-First for static image/icon/font/manifest assets
+  const isStaticMedia =
+    url.pathname === '/manifest.json' ||
+    /\.(?:png|jpg|jpeg|svg|gif|ico|webp|woff2?|ttf)$/i.test(url.pathname);
+
+  if (isStaticMedia) {
     event.respondWith(
-      fetch(event.request).catch(() => {
-        return caches.match('/');
+      caches.match(event.request).then((cachedResponse) => {
+        if (cachedResponse) {
+          return cachedResponse;
+        }
+        return fetch(event.request).then((response) => {
+          if (response && response.status === 200 && response.type === 'basic') {
+            const responseToCache = response.clone();
+            caches.open(CACHE_NAME).then((cache) => {
+              cache.put(event.request, responseToCache);
+            });
+          }
+          return response;
+        });
       })
     );
     return;
   }
 
-  // Cache first with network fallback for images and fonts
+  // Navigation, HTML, JS, TS, CSS: always Network-First
   event.respondWith(
-    caches.match(event.request).then((cachedResponse) => {
-      if (cachedResponse) {
-        return cachedResponse;
-      }
-      return fetch(event.request).then((response) => {
-        if (!response || response.status !== 200 || response.type !== 'basic') {
-          return response;
-        }
-        const responseToCache = response.clone();
-        caches.open(CACHE_NAME).then((cache) => {
-          cache.put(event.request, responseToCache);
-        });
-        return response;
-      }).catch(() => {
-        // Return offline fallback if available
-      });
+    fetch(event.request).catch(() => {
+      return caches.match(event.request);
     })
   );
 });

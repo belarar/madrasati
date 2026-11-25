@@ -48,6 +48,7 @@ export interface SchoolDatabase {
   userCustomPinTimestamps?: Record<string, string>; // identifier -> ISO timestamp
   passwordResetRequests: PasswordResetRequest[];
   customStudents?: any[];
+  deletedAnnouncementIds?: string[];
 }
 
 export interface PasswordResetRequest {
@@ -78,6 +79,7 @@ function loadDatabase(): SchoolDatabase {
         if (!Array.isArray(parsed.passwordResetRequests)) parsed.passwordResetRequests = [];
         if (!Array.isArray(parsed.internalStaffSummons)) parsed.internalStaffSummons = [];
         if (!Array.isArray(parsed.customStudents)) parsed.customStudents = [];
+        if (!Array.isArray(parsed.deletedAnnouncementIds)) parsed.deletedAnnouncementIds = [];
 
         // Seed initial sample conversation between two 2AM-2 classmates if empty
         if (parsed.privateConversations.length === 0) {
@@ -201,6 +203,7 @@ function loadDatabase(): SchoolDatabase {
     userCustomPins: {},
     userCustomPinTimestamps: {},
     passwordResetRequests: [],
+    deletedAnnouncementIds: [],
   };
 
   saveDatabase(initialDb);
@@ -221,6 +224,14 @@ function saveDatabase(data: SchoolDatabase): void {
 // In-Memory Database Cached from file
 let db = loadDatabase();
 
+// Prevent browser / SW / proxy caching of any API responses
+app.use('/api', (_req, res, next) => {
+  res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, proxy-revalidate');
+  res.setHeader('Pragma', 'no-cache');
+  res.setHeader('Expires', '0');
+  next();
+});
+
 // ================= API ROUTES (Cross-Device Sync) =================
 
 // 1. Health check & Meta
@@ -237,9 +248,13 @@ app.get('/api/health', (req, res) => {
 
 // 2. Comprehensive Bi-Directional Multi-Device Sync
 app.get('/api/sync', (req, res) => {
+  const sortedAnnouncements = [...(db.announcements || [])].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
   res.json({
     documents: db.documents,
-    announcements: db.announcements,
+    announcements: sortedAnnouncements,
+    deletedAnnouncementIds: db.deletedAnnouncementIds || [],
     summons: db.summons,
     peerExchanges: db.peerExchanges,
     privateConversations: db.privateConversations,
@@ -278,10 +293,11 @@ app.post('/api/sync', (req, res) => {
     }
   }
 
-  // Merge announcements
+  // Merge announcements (skip any IDs that were explicitly deleted)
   if (Array.isArray(clientAnns)) {
+    const deletedSet = new Set(db.deletedAnnouncementIds || []);
     for (const cAnn of clientAnns) {
-      if (cAnn && cAnn.id && !db.announcements.some(a => a.id === cAnn.id)) {
+      if (cAnn && cAnn.id && !deletedSet.has(cAnn.id) && !db.announcements.some(a => a.id === cAnn.id)) {
         db.announcements.unshift(cAnn);
         changed = true;
       }
@@ -379,9 +395,14 @@ app.post('/api/sync', (req, res) => {
     saveDatabase(db);
   }
 
+  const sortedAnnouncements = [...(db.announcements || [])].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+
   res.json({
     documents: db.documents,
-    announcements: db.announcements,
+    announcements: sortedAnnouncements,
+    deletedAnnouncementIds: db.deletedAnnouncementIds || [],
     summons: db.summons,
     peerExchanges: db.peerExchanges,
     privateConversations: db.privateConversations,
@@ -445,22 +466,24 @@ app.post('/api/documents', (req, res) => {
 
   db.documents = [newDoc, ...db.documents.filter(d => d.id !== newDoc.id)];
 
-  // Auto-generate notification for target classes / students
+  // Auto-generate deterministic notification for target classes / students
   const targetClassesStr = (newDoc.targetClasses || []).join('، ');
-  const notif: AppNotification = {
-    id: 'notif-doc-' + Date.now(),
-    type: 'document',
-    title: `وثيقة جديدة: ${newDoc.title}`,
-    message: `قام ${newDoc.authorName || 'الأستاذ'} بنشر وثيقة جديدة (${newDoc.subject || 'مادة'}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
-    targetRole: newDoc.targetAudience === 'teachers' ? 'teachers' : 'students',
-    targetClassId: (newDoc.targetClasses && newDoc.targetClasses[0] !== 'ALL') ? newDoc.targetClasses[0] : undefined,
-    sourceAuthorName: newDoc.authorName || 'الأستاذ',
-    sourceId: newDoc.id,
-    createdAt: new Date().toISOString(),
-    readBy: [],
-  };
-
-  db.notifications = [notif, ...db.notifications];
+  const docNotifId = `notif-doc-${newDoc.id}`;
+  if (!db.notifications.some(n => n.id === docNotifId)) {
+    const notif: AppNotification = {
+      id: docNotifId,
+      type: 'document',
+      title: `وثيقة جديدة: ${newDoc.title}`,
+      message: `قام ${newDoc.authorName || 'الأستاذ'} بنشر وثيقة جديدة (${newDoc.subject || 'مادة'}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
+      targetRole: newDoc.targetAudience === 'teachers' ? 'teachers' : 'students',
+      targetClassId: (newDoc.targetClasses && newDoc.targetClasses[0] !== 'ALL') ? newDoc.targetClasses[0] : undefined,
+      sourceAuthorName: newDoc.authorName || 'الأستاذ',
+      sourceId: newDoc.id,
+      createdAt: new Date().toISOString(),
+      readBy: [],
+    };
+    db.notifications = [notif, ...db.notifications];
+  }
   saveDatabase(db);
 
   res.status(201).json(newDoc);
@@ -572,11 +595,14 @@ app.delete('/api/documents/:id', (req, res) => {
 
 // 4. Announcements API
 app.get('/api/announcements', (req, res) => {
-  res.json(db.announcements);
+  const sorted = [...(db.announcements || [])].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
+  res.json(sorted);
 });
 
 app.post('/api/announcements', (req, res) => {
-  const ann = req.body;
+  const ann = req.body || {};
   const newAnn = {
     ...ann,
     id: ann.id || 'ann-' + Date.now(),
@@ -584,22 +610,30 @@ app.post('/api/announcements', (req, res) => {
     views: ann.views || 1,
   };
 
+  if (Array.isArray(db.deletedAnnouncementIds)) {
+    db.deletedAnnouncementIds = db.deletedAnnouncementIds.filter(id => id !== newAnn.id);
+  }
+
   db.announcements = [newAnn, ...db.announcements.filter(a => a.id !== newAnn.id)];
 
-  // Create notification
-  const notif: AppNotification = {
-    id: 'notif-ann-' + Date.now(),
-    type: 'announcement',
-    title: `إعلان رسمي جديد: ${newAnn.title}`,
-    message: newAnn.content.slice(0, 140) + '...',
-    targetRole: newAnn.target || 'all',
-    sourceAuthorName: newAnn.authorName || 'إدارة المؤسسة',
-    sourceId: newAnn.id,
-    createdAt: new Date().toISOString(),
-    readBy: [],
-  };
+  // Deterministic notification ID so Client, Server, and Firestore never create duplicates
+  const annNotifId = `notif-ann-${newAnn.id}`;
+  if (!db.notifications.some(n => n.id === annNotifId)) {
+    const contentText = typeof newAnn.content === 'string' ? newAnn.content : '';
+    const notif: AppNotification = {
+      id: annNotifId,
+      type: 'announcement',
+      title: `إعلان رسمي جديد: ${newAnn.title || ''}`,
+      message: contentText.slice(0, 140) + (contentText.length > 140 ? '...' : ''),
+      targetRole: newAnn.target || 'all',
+      sourceAuthorName: newAnn.authorName || 'إدارة المؤسسة',
+      sourceId: newAnn.id,
+      createdAt: newAnn.createdAt || new Date().toISOString(),
+      readBy: [],
+    };
+    db.notifications = [notif, ...db.notifications];
+  }
 
-  db.notifications = [notif, ...db.notifications];
   saveDatabase(db);
 
   res.status(201).json(newAnn);
@@ -608,6 +642,11 @@ app.post('/api/announcements', (req, res) => {
 app.delete('/api/announcements/:id', (req, res) => {
   const { id } = req.params;
   db.announcements = db.announcements.filter(a => a.id !== id);
+  if (!Array.isArray(db.deletedAnnouncementIds)) db.deletedAnnouncementIds = [];
+  if (!db.deletedAnnouncementIds.includes(id)) {
+    db.deletedAnnouncementIds = [id, ...db.deletedAnnouncementIds].slice(0, 200);
+  }
+  db.notifications = db.notifications.filter(n => n.sourceId !== id && n.id !== `notif-ann-${id}`);
   saveDatabase(db);
   res.json({ success: true });
 });
@@ -959,25 +998,41 @@ app.delete('/api/conversations/:id', (req, res) => {
 // 7. Notifications API
 app.get('/api/notifications', (req, res) => {
   const { userId, role, classId } = req.query;
+  const cleanUserId = typeof userId === 'string' ? userId.trim().toLowerCase() : '';
+  const cleanRole = typeof role === 'string' ? role.trim() : '';
+  const cleanClassId = typeof classId === 'string' ? classId.trim() : '';
+
+  const sorted = [...(db.notifications || [])].sort(
+    (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+  );
 
   // Filter notifications relevant to this user
-  const userNotifs = db.notifications.filter(n => {
-    // If specific target user ID
-    if (n.targetUserId && userId && n.targetUserId === userId) return true;
+  const userNotifs = sorted.filter(n => {
+    if (n.targetUserId) {
+      return Boolean(cleanUserId && n.targetUserId.trim().toLowerCase() === cleanUserId);
+    }
 
-    // If specific class
-    if (n.targetClassId && classId && n.targetClassId === classId) return true;
+    if (n.targetClassId) {
+      if (cleanRole === 'student') {
+        return Boolean(cleanClassId && n.targetClassId === cleanClassId);
+      }
+      return true;
+    }
 
-    // Target roles
-    if (n.targetRole === 'all') return true;
-    if (role && n.targetRole === role) return true;
-    if (role && role !== 'student' && n.targetRole === 'teachers') return true;
-    if (role === 'student' && n.targetRole === 'students') return true;
-
+    if (!n.targetRole || n.targetRole === 'all') return true;
+    if (cleanRole === 'student') return n.targetRole === 'students';
+    if (cleanRole === 'teacher') return n.targetRole === 'teachers';
+    if (cleanRole) {
+      return (
+        n.targetRole === cleanRole ||
+        n.targetRole === 'staff' ||
+        n.targetRole === 'teachers'
+      );
+    }
     return false;
   });
 
-  res.json(userNotifs.slice(0, 30));
+  res.json(userNotifs.slice(0, 50));
 });
 
 app.post('/api/notifications/mark-read', (req, res) => {
@@ -1203,7 +1258,7 @@ interface ServerPresenceEntry {
 }
 
 const presenceMap = new Map<string, ServerPresenceEntry>();
-const PRESENCE_TTL_MS = 90 * 1000;
+const PRESENCE_TTL_MS = 120 * 1000;
 
 app.post('/api/presence/heartbeat', (req, res) => {
   const body = req.body || {};
@@ -1215,6 +1270,7 @@ app.post('/api/presence/heartbeat', (req, res) => {
     return res.status(400).json({ error: 'بيانات التواجد غير مكتملة.' });
   }
 
+  const now = Date.now();
   presenceMap.set(rawId, {
     identifier: String(body.identifier).trim(),
     name,
@@ -1222,11 +1278,11 @@ app.post('/api/presence/heartbeat', (req, res) => {
     title: typeof body.title === 'string' ? body.title : undefined,
     classId: typeof body.classId === 'string' ? body.classId : undefined,
     className: typeof body.className === 'string' ? body.className : undefined,
-    lastSeen: Date.now(),
+    lastSeen: now,
     isOnline: true,
   });
 
-  res.json({ success: true });
+  res.json({ success: true, serverTime: now });
 });
 
 app.post('/api/presence/offline', (req, res) => {

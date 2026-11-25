@@ -37,7 +37,7 @@ import {
   deleteInternalStaffSummon,
   getInternalStaffSummons,
   openWhatsAppSummon,
-  saveAnnouncement,
+  saveAnnouncementAsync,
   saveInternalStaffSummon,
   saveSummon,
   updateInternalStaffSummonStatus,
@@ -251,11 +251,11 @@ export const CensorView: React.FC<CensorViewProps> = ({
     }, 2000);
   };
 
-  const handleCreateAnnouncement = (e: React.FormEvent) => {
+  const handleCreateAnnouncement = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!annTitle.trim() || !annContent.trim()) return;
 
-    saveAnnouncement({
+    await saveAnnouncementAsync({
       title: annTitle.trim(),
       content: annContent.trim(),
       target: annTarget,

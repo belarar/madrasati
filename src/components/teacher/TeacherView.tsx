@@ -30,7 +30,7 @@ import { getTeacherAssignedClasses } from '../../data/officialStaff';
 import {
   deleteAnnouncement,
   deleteDocument,
-  saveAnnouncement,
+  saveAnnouncementAsync,
   saveDocument,
   syncWithServer,
 } from '../../services/storageService';
@@ -179,11 +179,11 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
     }
   };
 
-  const handleCreateTeacherAnn = (e: React.FormEvent) => {
+  const handleCreateTeacherAnn = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!teacherAnnTitle.trim() || !teacherAnnContent.trim()) return;
 
-    saveAnnouncement({
+    await saveAnnouncementAsync({
       title: teacherAnnTitle.trim(),
       content: teacherAnnContent.trim(),
       target: teacherAnnTarget,

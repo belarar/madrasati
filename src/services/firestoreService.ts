@@ -31,7 +31,33 @@ export enum OperationType {
   WRITE = 'write',
 }
 
+let firestoreQuotaExceededUntil = 0;
+
+export function isFirestoreQuotaExceeded(): boolean {
+  return Date.now() < firestoreQuotaExceededUntil;
+}
+
+export function detectFirestoreQuotaError(error: unknown): boolean {
+  const msg = error instanceof Error ? error.message : String(error || '');
+  const code = typeof error === 'object' && error !== null ? (error as any).code : '';
+  if (
+    code === 'resource-exhausted' ||
+    msg.includes('Quota exceeded') ||
+    msg.includes('RESOURCE_EXHAUSTED') ||
+    msg.includes('429')
+  ) {
+    const already = isFirestoreQuotaExceeded();
+    firestoreQuotaExceededUntil = Date.now() + 10 * 60 * 1000;
+    if (!already && typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
+    }
+    return true;
+  }
+  return false;
+}
+
 export function handleFirestoreError(error: unknown, operationType: OperationType, path: string | null) {
+  detectFirestoreQuotaError(error);
   const errInfo = {
     error: error instanceof Error ? error.message : String(error),
     operationType,
@@ -42,11 +68,13 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
 
 // Validate connection to Firestore on initialization
 export async function testConnection(): Promise<boolean> {
+  if (isFirestoreQuotaExceeded()) return false;
   try {
     await getDocFromServer(doc(firestore, 'test', 'connection'));
     console.log('[Firestore] Cloud database connection verified.');
     return true;
   } catch (error) {
+    detectFirestoreQuotaError(error);
     if (error instanceof Error && error.message.includes('the client is offline')) {
       console.warn('[Firestore] Please check your Firebase configuration or internet connection.');
     }
@@ -125,6 +153,7 @@ export function initFirestoreRealtimeSync(callbacks: {
       callbacks.onDocuments(docs);
     },
     err => {
+      detectFirestoreQuotaError(err);
       console.warn('[Firestore] Documents subscription error:', err);
     }
   );
@@ -140,7 +169,10 @@ export function initFirestoreRealtimeSync(callbacks: {
       anns.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callbacks.onAnnouncements(anns);
     },
-    err => console.warn('[Firestore] Announcements subscription error:', err)
+    err => {
+      detectFirestoreQuotaError(err);
+      console.warn('[Firestore] Announcements subscription error:', err);
+    }
   );
 
   // 3. Summons real-time listener
@@ -154,7 +186,10 @@ export function initFirestoreRealtimeSync(callbacks: {
       summons.sort((a, b) => new Date(b.issuedAt || (b as any).createdAt).getTime() - new Date(a.issuedAt || (a as any).createdAt).getTime());
       callbacks.onSummons(summons);
     },
-    err => console.warn('[Firestore] Summons subscription error:', err)
+    err => {
+      detectFirestoreQuotaError(err);
+      console.warn('[Firestore] Summons subscription error:', err);
+    }
   );
 
   // 4. Peer Exchanges real-time listener
@@ -168,7 +203,10 @@ export function initFirestoreRealtimeSync(callbacks: {
       posts.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callbacks.onPeerExchanges(posts);
     },
-    err => console.warn('[Firestore] Peer exchanges subscription error:', err)
+    err => {
+      detectFirestoreQuotaError(err);
+      console.warn('[Firestore] Peer exchanges subscription error:', err);
+    }
   );
 
   // 5. Notifications real-time listener
@@ -182,7 +220,10 @@ export function initFirestoreRealtimeSync(callbacks: {
       notifs.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
       callbacks.onNotifications(notifs);
     },
-    err => console.warn('[Firestore] Notifications subscription error:', err)
+    err => {
+      detectFirestoreQuotaError(err);
+      console.warn('[Firestore] Notifications subscription error:', err);
+    }
   );
 
   // 6. Password Reset Requests real-time listener (Ensures Director sees requests instantly)
@@ -197,7 +238,10 @@ export function initFirestoreRealtimeSync(callbacks: {
         requests.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
         callbacks.onPasswordResetRequests?.(requests);
       },
-      err => console.warn('[Firestore] Reset requests subscription warning:', err)
+      err => {
+        detectFirestoreQuotaError(err);
+        console.warn('[Firestore] Reset requests subscription warning:', err);
+      }
     );
   }
 
@@ -218,7 +262,10 @@ export function initFirestoreRealtimeSync(callbacks: {
         });
         callbacks.onStaffPins?.(pins);
       },
-      err => console.warn('[Firestore] Staff pins subscription warning:', err)
+      err => {
+        detectFirestoreQuotaError(err);
+        console.warn('[Firestore] Staff pins subscription warning:', err);
+      }
     );
   }
 
@@ -333,6 +380,7 @@ function sanitizeForFirestore<T extends Record<string, any>>(obj: T, fallbackDow
 
 // Cloud Database Write Operations
 export async function saveDocumentToFirestore(docData: SchoolDocument): Promise<void> {
+  if (isFirestoreQuotaExceeded()) return;
   try {
     const docRef = doc(firestore, 'documents', docData.id);
     const downloadUrl = `/api/documents/${encodeURIComponent(docData.id)}/download`;
@@ -346,46 +394,56 @@ export async function saveDocumentToFirestore(docData: SchoolDocument): Promise<
       saveFilePayloadToFirestore(docData.id, docData.fileDataUrl).catch(() => {});
     }
 
-    // Auto-create cloud notification
-    const notifId = 'notif-doc-' + Date.now();
+    // Auto-create deterministic cloud notification
+    const notifId = `notif-doc-${docData.id}`;
     const notifRef = doc(firestore, 'notifications', notifId);
     const targetClassesStr = (docData.targetClasses || []).join('، ');
-    await setDoc(notifRef, {
-      id: notifId,
-      type: 'document',
-      title: `وثيقة جديدة: ${docData.title}`,
-      message: `قام ${docData.authorName || 'الأستاذ'} بنشر وثيقة جديدة (${docData.subject}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
-      targetRole: docData.targetAudience === 'teachers' ? 'teachers' : 'students',
-      targetClassId: docData.targetClasses && docData.targetClasses[0] !== 'ALL' ? docData.targetClasses[0] : null,
-      sourceAuthorName: docData.authorName,
-      sourceId: docData.id,
-      createdAt: new Date().toISOString(),
-      readBy: [],
-    });
+    await setDoc(
+      notifRef,
+      {
+        id: notifId,
+        type: 'document',
+        title: `وثيقة جديدة: ${docData.title}`,
+        message: `قام ${docData.authorName || 'الأستاذ'} بنشر وثيقة جديدة (${docData.subject}) موجهة إلى: ${targetClassesStr || 'الجميع'}.`,
+        targetRole: docData.targetAudience === 'teachers' ? 'teachers' : 'students',
+        targetClassId: docData.targetClasses && docData.targetClasses[0] !== 'ALL' ? docData.targetClasses[0] : null,
+        sourceAuthorName: docData.authorName,
+        sourceId: docData.id,
+        createdAt: docData.uploadDate || new Date().toISOString(),
+        readBy: [],
+      },
+      { merge: true }
+    );
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn(`[Firestore] Error saving document ${docData.id}:`, err);
   }
 }
 
 export async function deleteDocumentFromFirestore(docId: string): Promise<void> {
+  if (isFirestoreQuotaExceeded()) return;
   try {
     await deleteDoc(doc(firestore, 'documents', docId));
     console.log(`[Firestore] Document ${docId} deleted from cloud database.`);
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn(`[Firestore] Error deleting document ${docId}:`, err);
   }
 }
 
 export async function incrementDownloadCountInFirestore(docId: string, currentCount: number): Promise<void> {
+  if (isFirestoreQuotaExceeded()) return;
   try {
     const docRef = doc(firestore, 'documents', docId);
     await updateDoc(docRef, { downloadCount: (currentCount || 0) + 1 });
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.debug('[Firestore] Increment dl count err:', err);
   }
 }
 
-export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Promise<void> {
+export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Promise<boolean> {
+  if (isFirestoreQuotaExceeded()) return false;
   try {
     const annRef = doc(firestore, 'announcements', ann.id);
     const downloadUrl = ann.fileName ? `/api/announcements/${encodeURIComponent(ann.id)}/download` : undefined;
@@ -398,29 +456,39 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
       saveFilePayloadToFirestore(ann.id, ann.fileDataUrl).catch(() => {});
     }
 
-    // Auto-create cloud notification for announcement
-    const notifId = 'notif-ann-' + Date.now();
+    // Auto-create deterministic cloud notification for announcement
+    const notifId = `notif-ann-${ann.id}`;
     const notifRef = doc(firestore, 'notifications', notifId);
-    await setDoc(notifRef, {
-      id: notifId,
-      type: 'announcement',
-      title: `إعلان رسمي جديد: ${ann.title}`,
-      message: (ann.content || '').slice(0, 160) + ((ann.content || '').length > 160 ? '...' : ''),
-      targetRole: ann.target || 'all',
-      sourceAuthorName: ann.authorName || 'إدارة المؤسسة',
-      sourceId: ann.id,
-      createdAt: new Date().toISOString(),
-      readBy: [],
-    });
+    await setDoc(
+      notifRef,
+      {
+        id: notifId,
+        type: 'announcement',
+        title: `إعلان رسمي جديد: ${ann.title}`,
+        message: (ann.content || '').slice(0, 160) + ((ann.content || '').length > 160 ? '...' : ''),
+        targetRole: ann.target || 'all',
+        sourceAuthorName: ann.authorName || 'إدارة المؤسسة',
+        sourceId: ann.id,
+        createdAt: ann.createdAt || new Date().toISOString(),
+        readBy: [],
+      },
+      { merge: true }
+    );
+    return true;
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn(`[Firestore] Error saving announcement ${ann.id}:`, err);
+    return false;
   }
 }
 
 export async function deleteAnnouncementFromFirestore(annId: string): Promise<void> {
+  if (isFirestoreQuotaExceeded()) return;
   try {
     await deleteDoc(doc(firestore, 'announcements', annId));
+    await deleteDoc(doc(firestore, 'notifications', `notif-ann-${annId}`)).catch(() => {});
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn(`[Firestore] Error deleting announcement ${annId}:`, err);
   }
 }
@@ -560,6 +628,7 @@ export async function deletePasswordResetRequestFromFirestore(requestId: string)
 }
 
 export async function fetchPasswordResetRequestsFromFirestore(): Promise<FirestorePasswordResetRequest[]> {
+  if (isFirestoreQuotaExceeded()) return [];
   try {
     const snapshot = await getDocs(resetRequestsCol);
     const requests: FirestorePasswordResetRequest[] = [];
@@ -569,12 +638,14 @@ export async function fetchPasswordResetRequestsFromFirestore(): Promise<Firesto
     requests.sort((a, b) => new Date(b.requestDate).getTime() - new Date(a.requestDate).getTime());
     return requests;
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn('[Firestore] Error fetching reset requests:', err);
     return [];
   }
 }
 
 export async function saveStaffPinToFirestore(identifier: string, pin: string, updatedAt?: string): Promise<void> {
+  if (isFirestoreQuotaExceeded()) return;
   const cleanId = identifier.trim().toLowerCase();
   const cleanPin = pin.trim();
   const nowIso = updatedAt || new Date().toISOString();
@@ -585,11 +656,13 @@ export async function saveStaffPinToFirestore(identifier: string, pin: string, u
       updatedAt: nowIso,
     });
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn('[Firestore] Error saving staff pin:', err);
   }
 }
 
 export async function fetchStaffPinFromFirestore(identifier: string): Promise<FirestoreStaffPinRecord | null> {
+  if (isFirestoreQuotaExceeded()) return null;
   const cleanId = identifier.trim().toLowerCase();
   if (!cleanId) return null;
   const ref = doc(firestore, 'staff_pins', cleanId);
@@ -605,7 +678,9 @@ export async function fetchStaffPinFromFirestore(identifier: string): Promise<Fi
       }
     }
     return null;
-  } catch {
+  } catch (err) {
+    detectFirestoreQuotaError(err);
+    if (isFirestoreQuotaExceeded()) return null;
     try {
       const snap = await getDoc(ref);
       if (snap.exists()) {
@@ -624,6 +699,7 @@ export async function fetchStaffPinFromFirestore(identifier: string): Promise<Fi
 
 export async function fetchAllStaffPinsFromFirestore(): Promise<Record<string, FirestoreStaffPinRecord>> {
   const pins: Record<string, FirestoreStaffPinRecord> = {};
+  if (isFirestoreQuotaExceeded()) return pins;
   try {
     const snapshot = await getDocs(staffPinsCol);
     snapshot.forEach(d => {
@@ -636,6 +712,7 @@ export async function fetchAllStaffPinsFromFirestore(): Promise<Record<string, F
       }
     });
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn('[Firestore] Error fetching all staff pins:', err);
   }
   return pins;
@@ -716,14 +793,18 @@ export function initPrivateMessagesSync(
 }
 
 export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], existingAnns: SchoolAnnouncement[]) {
+  if (isFirestoreQuotaExceeded()) return;
   try {
+    if (typeof window !== 'undefined' && localStorage.getItem('ben_naama_firestore_seeded') === 'true') {
+      return;
+    }
     const snapshot = await getDocs(docsCol);
     if (snapshot.empty) {
       let docsToSeed = existingDocs;
       // If client has no docs in memory, try fetching from server /api/sync
       if (!docsToSeed || docsToSeed.length === 0) {
         try {
-          const res = await fetch('/api/sync');
+          const res = await fetch('/api/sync', { cache: 'no-store' });
           if (res.ok) {
             const data = await res.json();
             if (Array.isArray(data.documents) && data.documents.length > 0) {
@@ -749,14 +830,18 @@ export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], e
         await saveAnnouncementToFirestore(a);
       }
     }
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('ben_naama_firestore_seeded', 'true');
+    }
   } catch (err) {
+    detectFirestoreQuotaError(err);
     console.warn('[Firestore] Seed check warning:', err);
   }
 }
 
 // ================= Real-Time User Presence (Online Students & Teachers) =================
 export async function savePresenceHeartbeatToFirestore(record: UserPresenceRecord): Promise<void> {
-  if (!record.identifier) return;
+  if (!record.identifier || isFirestoreQuotaExceeded()) return;
   const docId = record.identifier.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   try {
     const cleanPayload: Record<string, unknown> = {
@@ -776,7 +861,7 @@ export async function savePresenceHeartbeatToFirestore(record: UserPresenceRecor
 }
 
 export async function markPresenceOfflineInFirestore(identifier: string): Promise<void> {
-  if (!identifier) return;
+  if (!identifier || isFirestoreQuotaExceeded()) return;
   const docId = identifier.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
   try {
     await setDoc(
@@ -795,6 +880,7 @@ export async function markPresenceOfflineInFirestore(identifier: string): Promis
 export function initPresenceRealtimeSync(
   onPresence: (records: UserPresenceRecord[]) => void
 ): () => void {
+  if (isFirestoreQuotaExceeded()) return () => {};
   return onSnapshot(
     presenceCol,
     snapshot => {
