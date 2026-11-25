@@ -1284,6 +1284,7 @@ interface ServerPresenceEntry {
   classId?: string;
   className?: string;
   lastSeen: number;
+  lastActive?: number;
   isOnline: boolean;
 }
 
@@ -1309,6 +1310,7 @@ app.post('/api/presence/heartbeat', (req, res) => {
     classId: typeof body.classId === 'string' ? body.classId : undefined,
     className: typeof body.className === 'string' ? body.className : undefined,
     lastSeen: now,
+    lastActive: now,
     isOnline: true,
   });
 

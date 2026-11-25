@@ -3822,6 +3822,7 @@ export async function deleteSupervisedMessage(conversationId: string, messageId:
 // ================= تتبع المتصلين الآن في المنصة (التلاميذ والأساتذة) =================
 
 export const PRESENCE_ONLINE_WINDOW_MS = 120_000;
+export const PRESENCE_LAST_ACTIVE_GRACE_MS = 30_000;
 
 let serverClockOffsetMs = 0;
 
@@ -3843,10 +3844,101 @@ export function isPresenceOnline(record?: UserPresenceRecord | null, now = Date.
   return diff <= PRESENCE_ONLINE_WINDOW_MS && diff >= -300_000;
 }
 
+export function getStoredUserLastActive(identifier?: string): number {
+  if (typeof window === 'undefined' || !identifier) return 0;
+  const normId = normalizePresenceId(identifier);
+  let latest = 0;
+  try {
+    const rawCurrent = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+    if (rawCurrent) {
+      const parsed = JSON.parse(rawCurrent) as UserProfile;
+      if (
+        parsed?.identifier &&
+        normalizePresenceId(parsed.identifier) === normId &&
+        typeof parsed.lastActive === 'number'
+      ) {
+        latest = Math.max(latest, parsed.lastActive);
+      }
+    }
+  } catch {}
+  try {
+    const rawUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+    if (rawUsers) {
+      const parsedUsers = JSON.parse(rawUsers) as UserProfile[];
+      if (Array.isArray(parsedUsers)) {
+        const matched = parsedUsers.find(
+          u => u?.identifier && normalizePresenceId(u.identifier) === normId
+        );
+        if (matched && typeof matched.lastActive === 'number') {
+          latest = Math.max(latest, matched.lastActive);
+        }
+      }
+    }
+  } catch {}
+  return latest;
+}
+
+export function isUserWithinLastActiveGrace(
+  identifier?: string,
+  record?: UserPresenceRecord | null,
+  now = Date.now(),
+  maxAgeMs = PRESENCE_LAST_ACTIVE_GRACE_MS
+): boolean {
+  const storedLastActive = getStoredUserLastActive(identifier);
+  const recordLastActive =
+    typeof record?.lastActive === 'number'
+      ? record.lastActive
+      : typeof record?.lastSeen === 'number'
+      ? record.lastSeen
+      : 0;
+  const effectiveLastActive = Math.max(storedLastActive, recordLastActive);
+  if (effectiveLastActive <= 0) return false;
+  const diff = now - effectiveLastActive;
+  return diff <= maxAgeMs && diff >= -300_000;
+}
+
 export async function sendPresenceHeartbeat(user: UserProfile | null): Promise<void> {
   if (!user || !user.identifier) return;
 
   const localNow = Date.now();
+  const normId = normalizePresenceId(user.identifier);
+  user.lastActive = localNow;
+
+  // Update lastActive timestamp on user object inside localStorage
+  if (typeof window !== 'undefined') {
+    try {
+      const rawCurrent = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+      if (rawCurrent) {
+        const parsedCurrent = JSON.parse(rawCurrent) as UserProfile;
+        if (parsedCurrent?.identifier && normalizePresenceId(parsedCurrent.identifier) === normId) {
+          localStorage.setItem(
+            STORAGE_KEYS.CURRENT_USER,
+            JSON.stringify({ ...parsedCurrent, lastActive: localNow })
+          );
+        }
+      }
+    } catch {}
+    try {
+      const rawUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+      if (rawUsers) {
+        const parsedUsers = JSON.parse(rawUsers) as UserProfile[];
+        if (Array.isArray(parsedUsers)) {
+          let changed = false;
+          const updatedUsers = parsedUsers.map(u => {
+            if (u?.identifier && normalizePresenceId(u.identifier) === normId) {
+              changed = true;
+              return { ...u, lastActive: localNow };
+            }
+            return u;
+          });
+          if (changed) {
+            localStorage.setItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+          }
+        }
+      }
+    } catch {}
+  }
+
   const record: UserPresenceRecord = {
     identifier: user.identifier,
     name: user.name,
@@ -3855,15 +3947,18 @@ export async function sendPresenceHeartbeat(user: UserProfile | null): Promise<v
     classId: user.classId,
     className: user.className,
     lastSeen: localNow,
+    lastActive: localNow,
     isOnline: true,
   };
 
-  presenceLocalCache.set(normalizePresenceId(user.identifier), record);
+  presenceLocalCache.set(normId, record);
   window.dispatchEvent(new Event('presence-updated'));
 
+  const alignedNow = getServerAlignedNowMs();
   savePresenceHeartbeatToFirestore({
     ...record,
-    lastSeen: getServerAlignedNowMs(),
+    lastSeen: alignedNow,
+    lastActive: alignedNow,
   }).catch(() => {});
 
   fetch('/api/presence/heartbeat', {
@@ -3974,6 +4069,7 @@ export function subscribeToLivePresence(
         serverRecords = data.records.map((rec: UserPresenceRecord) => ({
           ...rec,
           lastSeen: Math.min(now, rec.lastSeen - offset),
+          lastActive: typeof rec.lastActive === 'number' ? Math.min(now, rec.lastActive - offset) : undefined,
         }));
         emitMerged();
       }
@@ -3990,6 +4086,10 @@ export function subscribeToLivePresence(
         ...rec,
         // Guard against remote clock skew when merging Firestore timestamps into local timeline
         lastSeen: Math.min(now, rec.lastSeen - serverClockOffsetMs),
+        lastActive:
+          typeof rec.lastActive === 'number'
+            ? Math.min(now, rec.lastActive - serverClockOffsetMs)
+            : undefined,
       }));
       emitMerged();
     });

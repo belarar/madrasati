@@ -851,6 +851,7 @@ export async function savePresenceHeartbeatToFirestore(record: UserPresenceRecor
       lastSeen: record.lastSeen,
       isOnline: record.isOnline,
     };
+    if (typeof record.lastActive === 'number') cleanPayload.lastActive = record.lastActive;
     if (record.title) cleanPayload.title = record.title;
     if (record.classId) cleanPayload.classId = record.classId;
     if (record.className) cleanPayload.className = record.className;
@@ -896,6 +897,7 @@ export function initPresenceRealtimeSync(
             classId: data.classId,
             className: data.className,
             lastSeen: typeof data.lastSeen === 'number' ? data.lastSeen : 0,
+            lastActive: typeof data.lastActive === 'number' ? data.lastActive : undefined,
             isOnline: Boolean(data.isOnline),
           });
         }

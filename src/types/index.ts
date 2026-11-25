@@ -155,6 +155,7 @@ export interface UserProfile {
   rank?: string; // الرتبة الرسمية للموظف
   phone?: string;
   avatarUrl?: string;
+  lastActive?: number; // epoch ms of last heartbeat
 }
 
 // ================= قناة التضامن والتبادل بين تلاميذ القسم =================
@@ -250,5 +251,6 @@ export interface UserPresenceRecord {
   classId?: string;
   className?: string;
   lastSeen: number; // epoch ms
+  lastActive?: number; // epoch ms
   isOnline: boolean;
 }

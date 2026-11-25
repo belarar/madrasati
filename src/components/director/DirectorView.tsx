@@ -38,6 +38,7 @@ import {
   getPendingResetRequestsCount,
   fetchPasswordResetRequestsFromServer,
   isPresenceOnline,
+  isUserWithinLastActiveGrace,
   saveAnnouncementAsync,
   saveDocument,
   subscribeToLivePresence,
@@ -73,6 +74,9 @@ interface DirectorViewProps {
   announcements: SchoolAnnouncement[];
   summons: ParentSummon[];
   onRefreshData: () => void;
+  presenceRecords?: UserPresenceRecord[];
+  presenceNowTs?: number;
+  checkUserOnline?: (identifier: string, record?: UserPresenceRecord | null, now?: number) => boolean;
 }
 
 export const DirectorView: React.FC<DirectorViewProps> = ({
@@ -81,6 +85,9 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   announcements,
   summons,
   onRefreshData,
+  presenceRecords: propPresenceRecords,
+  presenceNowTs: propPresenceNowTs,
+  checkUserOnline,
 }) => {
   const [activeTab, setActiveTab] = useState<'announcements' | 'new-announcement' | 'documents' | 'upload-doc' | 'staff-accounts' | 'student-codes' | 'online-users' | 'roster' | 'chat-supervision'>('announcements');
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
@@ -88,8 +95,19 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   const [studentRefreshSignal, setStudentRefreshSignal] = useState(0);
 
   // Live Presence State (Online Students & Teachers)
-  const [presenceRecords, setPresenceRecords] = useState<UserPresenceRecord[]>([]);
-  const [presenceNowTs, setPresenceNowTs] = useState<number>(() => Date.now());
+  const [localPresenceRecords, setLocalPresenceRecords] = useState<UserPresenceRecord[]>([]);
+  const [localPresenceNowTs, setLocalPresenceNowTs] = useState<number>(() => Date.now());
+  const presenceRecords = propPresenceRecords ?? localPresenceRecords;
+  const presenceNowTs = propPresenceNowTs ?? localPresenceNowTs;
+  const isUserConnected = React.useCallback(
+    (identifier: string, record?: UserPresenceRecord | null, now = presenceNowTs) => {
+      if (checkUserOnline) {
+        return checkUserOnline(identifier, record, now);
+      }
+      return isPresenceOnline(record, now) || isUserWithinLastActiveGrace(identifier, record, now);
+    },
+    [checkUserOnline, presenceNowTs]
+  );
   const [presenceSearch, setPresenceSearch] = useState('');
   const [presenceClassFilter, setPresenceClassFilter] = useState<string>('ALL');
   const [presenceViewMode, setPresenceViewMode] = useState<'online' | 'all'>('online');
@@ -169,12 +187,17 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   }, []);
 
   React.useEffect(() => {
+    if (propPresenceRecords !== undefined) {
+      return () => {
+        if (annTimerRef.current) clearTimeout(annTimerRef.current);
+      };
+    }
     const unsubscribe = subscribeToLivePresence(records => {
-      setPresenceRecords(records);
-      setPresenceNowTs(Date.now());
+      setLocalPresenceRecords(records);
+      setLocalPresenceNowTs(Date.now());
     });
     const expiryTick = setInterval(() => {
-      setPresenceNowTs(Date.now());
+      setLocalPresenceNowTs(Date.now());
     }, 5_000);
 
     return () => {
@@ -182,7 +205,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       clearInterval(expiryTick);
       if (annTimerRef.current) clearTimeout(annTimerRef.current);
     };
-  }, []);
+  }, [propPresenceRecords]);
 
   const filteredAnnouncements = announcements.filter(a => {
     if (filterTarget === 'ALL') return true;
@@ -430,7 +453,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     const seen = new Set<string>();
     const list: Array<{ user: UserProfile; presence: UserPresenceRecord }> = [];
     for (const rec of presenceRecords) {
-      if (rec.role !== 'student' || !isPresenceOnline(rec, presenceNowTs)) continue;
+      if (rec.role !== 'student' || !isUserConnected(rec.identifier, rec, presenceNowTs)) continue;
       const normId = rec.identifier.trim().toLowerCase();
       if (seen.has(normId)) continue;
       seen.add(normId);
@@ -448,13 +471,13 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       });
     }
     return list.sort((a, b) => b.presence.lastSeen - a.presence.lastSeen);
-  }, [presenceRecords, presenceNowTs, userDirectoryById]);
+  }, [presenceRecords, presenceNowTs, userDirectoryById, isUserConnected]);
 
   const onlineTeacherRecords = React.useMemo(() => {
     const seen = new Set<string>();
     const list: Array<{ user: UserProfile; presence: UserPresenceRecord }> = [];
     for (const rec of presenceRecords) {
-      if (rec.role !== 'teacher' || !isPresenceOnline(rec, presenceNowTs)) continue;
+      if (rec.role !== 'teacher' || !isUserConnected(rec.identifier, rec, presenceNowTs)) continue;
       const normId = rec.identifier.trim().toLowerCase();
       if (seen.has(normId)) continue;
       seen.add(normId);
@@ -471,7 +494,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       });
     }
     return list.sort((a, b) => b.presence.lastSeen - a.presence.lastSeen);
-  }, [presenceRecords, presenceNowTs, userDirectoryById]);
+  }, [presenceRecords, presenceNowTs, userDirectoryById, isUserConnected]);
 
   const formatPresenceAgo = (lastSeen?: number) => {
     if (!lastSeen) return 'غير متصل';
@@ -1767,8 +1790,8 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             );
           })
           .sort((a, b) => {
-            const aOn = isPresenceOnline(a.presence, presenceNowTs) ? 1 : 0;
-            const bOn = isPresenceOnline(b.presence, presenceNowTs) ? 1 : 0;
+            const aOn = isUserConnected(a.user.identifier, a.presence, presenceNowTs) ? 1 : 0;
+            const bOn = isUserConnected(b.user.identifier, b.presence, presenceNowTs) ? 1 : 0;
             if (aOn !== bOn) return bOn - aOn;
             return (b.presence?.lastSeen || 0) - (a.presence?.lastSeen || 0);
           });
@@ -1790,8 +1813,8 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             );
           })
           .sort((a, b) => {
-            const aOn = isPresenceOnline(a.presence, presenceNowTs) ? 1 : 0;
-            const bOn = isPresenceOnline(b.presence, presenceNowTs) ? 1 : 0;
+            const aOn = isUserConnected(a.user.identifier, a.presence, presenceNowTs) ? 1 : 0;
+            const bOn = isUserConnected(b.user.identifier, b.presence, presenceNowTs) ? 1 : 0;
             if (aOn !== bOn) return bOn - aOn;
             return (b.presence?.lastSeen || 0) - (a.presence?.lastSeen || 0);
           });
@@ -1951,7 +1974,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 ) : (
                   <div className="space-y-2.5 max-h-[540px] overflow-y-auto pl-1">
                     {studentEntries.map(({ user: stu, presence }) => {
-                      const online = isPresenceOnline(presence, presenceNowTs);
+                      const online = isUserConnected(stu.identifier, presence, presenceNowTs);
                       return (
                         <div
                           key={stu.identifier}
@@ -2035,7 +2058,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 ) : (
                   <div className="space-y-2.5 max-h-[540px] overflow-y-auto pl-1">
                     {teacherEntries.map(({ user: teacher, presence }) => {
-                      const online = isPresenceOnline(presence, presenceNowTs);
+                      const online = isUserConnected(teacher.identifier, presence, presenceNowTs);
                       return (
                         <div
                           key={teacher.identifier}

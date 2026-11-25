@@ -42,6 +42,8 @@ import { StudentView } from './components/student/StudentView';
 import { TeacherView } from './components/teacher/TeacherView';
 import { MOCK_USERS, SCHOOL_FULL_HEADER, SCHOOL_NAME } from './data/mockData';
 import {
+  PRESENCE_LAST_ACTIVE_GRACE_MS,
+  STORAGE_KEYS,
   getAnnouncements,
   getCurrentUser,
   getDocuments,
@@ -49,10 +51,12 @@ import {
   getSummons,
   getUnreadNotificationsCount,
   initStorage,
+  isPresenceOnline,
   markAnnouncementAsSeen,
   markUserOffline,
   sendPresenceHeartbeat,
   setCurrentUser,
+  subscribeToLivePresence,
   syncWithServer,
 } from './services/storageService';
 import {
@@ -60,6 +64,7 @@ import {
   ParentSummon,
   SchoolAnnouncement,
   SchoolDocument,
+  UserPresenceRecord,
   UserProfile,
 } from './types';
 import { AnnouncementCard } from './components/common/AnnouncementCard';
@@ -84,6 +89,8 @@ export default function App() {
   const [previewDoc, setPreviewDoc] = useState<SchoolDocument | null>(null);
   const [selectedAnnouncementModal, setSelectedAnnouncementModal] =
     useState<SchoolAnnouncement | null>(null);
+  const [presenceRecords, setPresenceRecords] = useState<UserPresenceRecord[]>([]);
+  const [presenceNowTs, setPresenceNowTs] = useState<number>(() => Date.now());
 
   const refreshAllData = useCallback(() => {
     const u = getCurrentUser();
@@ -193,6 +200,71 @@ export default function App() {
     };
   }, [currentUserId, currentUser?.name, currentUser?.classId, currentUser?.role]);
 
+  useEffect(() => {
+    if (currentUser?.role !== 'director') return;
+    const unsubscribe = subscribeToLivePresence(records => {
+      setPresenceRecords(records);
+      setPresenceNowTs(Date.now());
+    });
+    const ticker = setInterval(() => {
+      setPresenceNowTs(Date.now());
+    }, 5_000);
+    return () => {
+      unsubscribe();
+      clearInterval(ticker);
+    };
+  }, [currentUser?.role]);
+
+  const isOtherUserOnline = useCallback(
+    (identifier: string, record?: UserPresenceRecord | null, now = presenceNowTs): boolean => {
+      if (isPresenceOnline(record, now)) return true;
+
+      // Check lastActive timestamp in localStorage user object & presence record does not exceed 30s before displaying 'غير متصل'
+      const normId = identifier.trim().toLowerCase();
+      let storedLastActive = 0;
+      try {
+        const rawCurrent = localStorage.getItem(STORAGE_KEYS.CURRENT_USER);
+        if (rawCurrent) {
+          const parsedCurrent = JSON.parse(rawCurrent) as UserProfile;
+          if (
+            parsedCurrent?.identifier?.trim().toLowerCase() === normId &&
+            typeof parsedCurrent.lastActive === 'number'
+          ) {
+            storedLastActive = Math.max(storedLastActive, parsedCurrent.lastActive);
+          }
+        }
+        const rawUsers = localStorage.getItem(STORAGE_KEYS.USERS);
+        if (rawUsers) {
+          const parsedUsers = JSON.parse(rawUsers) as UserProfile[];
+          if (Array.isArray(parsedUsers)) {
+            const matched = parsedUsers.find(
+              u => u?.identifier?.trim().toLowerCase() === normId
+            );
+            if (matched && typeof matched.lastActive === 'number') {
+              storedLastActive = Math.max(storedLastActive, matched.lastActive);
+            }
+          }
+        }
+      } catch {}
+
+      const recordLastActive =
+        typeof record?.lastActive === 'number'
+          ? record.lastActive
+          : typeof record?.lastSeen === 'number'
+          ? record.lastSeen
+          : 0;
+      const effectiveLastActive = Math.max(storedLastActive, recordLastActive);
+      if (effectiveLastActive > 0) {
+        const elapsedMs = now - effectiveLastActive;
+        if (elapsedMs <= PRESENCE_LAST_ACTIVE_GRACE_MS && elapsedMs >= -300_000) {
+          return true;
+        }
+      }
+      return false;
+    },
+    [presenceNowTs]
+  );
+
   const handleCopyCleanLink = () => {
     const cleanUrl = window.location.origin;
     navigator.clipboard.writeText(cleanUrl);
@@ -205,7 +277,7 @@ export default function App() {
     setUser(user);
     sendPresenceHeartbeat(user);
     refreshAllData();
-    syncWithServer().then(() => refreshAllData()).catch(() => {});
+    syncWithServer(true).then(() => refreshAllData()).catch(() => {});
   };
 
   return (
@@ -272,6 +344,9 @@ export default function App() {
                 announcements={announcements}
                 summons={summons}
                 onRefreshData={refreshAllData}
+                presenceRecords={presenceRecords}
+                presenceNowTs={presenceNowTs}
+                checkUserOnline={isOtherUserOnline}
               />
             )}
           </>
