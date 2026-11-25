@@ -19,7 +19,7 @@ import {
 import { SCHOOL_NAME } from '../data/mockData';
 import { OFFICIAL_STAFF_LIST } from '../data/officialStaff';
 import {
-  authenticateStudentByActivationCode,
+  authenticateStudentByActivationCodeAsync,
   authenticateUserAsync,
   normalizeIdentifier,
   submitPasswordResetRequest,
@@ -65,7 +65,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     if (error) setError(null);
   };
 
-  const handleStudentSubmit = (e: React.FormEvent) => {
+  const handleStudentSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError(null);
 
@@ -76,8 +76,8 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
     }
 
     setLoading(true);
-    setTimeout(() => {
-      const res = authenticateStudentByActivationCode(cleanCode);
+    try {
+      const res = await authenticateStudentByActivationCodeAsync(cleanCode);
       setLoading(false);
 
       if (res.success && res.user) {
@@ -86,7 +86,10 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
       } else {
         setError(res.message || 'رمز التفعيل المدخل غير صحيح أو غير مسجل في سجلات المؤسسة.');
       }
-    }, 200);
+    } catch {
+      setLoading(false);
+      setError('حدث خطأ أثناء التحقق من رمز التفعيل. يرجى المحاولة مرة أخرى.');
+    }
   };
 
   // Staff Login Submit Handler - Strictly allows only registered official staff (with live cloud sync check)

@@ -73,6 +73,7 @@ export default function App() {
   const [pwaModalOpen, setPwaModalOpen] = useState(false);
   const [deferredPrompt, setDeferredPrompt] = useState<any>(null);
   const [copiedShare, setCopiedShare] = useState(false);
+  const [heroLogoError, setHeroLogoError] = useState(false);
 
   // Notifications & Document Preview State
   const [notificationsModalOpen, setNotificationsModalOpen] = useState(false);
@@ -265,13 +266,18 @@ export default function App() {
             {/* Welcome Institutional Hero */}
             <div className="text-center space-y-4">
               <div className="flex justify-center mb-1">
-                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl overflow-hidden shadow-xl border-2 border-emerald-500/40 bg-emerald-950 p-1 group hover:scale-105 transition-transform duration-300">
-                  <img
-                    src="/pwa-192x192.png"
-                    alt={SCHOOL_NAME}
-                    className="w-full h-full object-cover rounded-2xl shadow-inner"
-                    referrerPolicy="no-referrer"
-                  />
+                <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-3xl overflow-hidden shadow-xl border-2 border-emerald-500/40 bg-emerald-950 p-1 group hover:scale-105 transition-transform duration-300 flex items-center justify-center">
+                  {heroLogoError ? (
+                    <GraduationCap className="w-11 h-11 text-yellow-300" />
+                  ) : (
+                    <img
+                      src="/pwa-192x192.png"
+                      alt={SCHOOL_NAME}
+                      className="w-full h-full object-cover rounded-2xl shadow-inner"
+                      referrerPolicy="no-referrer"
+                      onError={() => setHeroLogoError(true)}
+                    />
+                  )}
                 </div>
               </div>
 

@@ -152,6 +152,22 @@
         "isOnline": { "type": "boolean" }
       },
       "required": ["identifier", "name", "role", "lastSeen", "isOnline"]
+    },
+    "CustomStudent": {
+      "title": "CustomStudent",
+      "description": "Newly added student profile with a 6-digit activation code",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "identifier": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "classId": { "type": "string" },
+        "className": { "type": "string" },
+        "activationCode": { "type": "string" },
+        "title": { "type": "string" }
+      },
+      "required": ["identifier", "name", "role", "classId", "activationCode"]
     }
   },
   "firestore": {
@@ -186,6 +202,10 @@
     "/user_presence/{presenceId}": {
       "schema": { "$ref": "#/entities/UserPresence" },
       "description": "Collection of live online presence heartbeats for students and teachers"
+    },
+    "/custom_students/{studentId}": {
+      "schema": { "$ref": "#/entities/CustomStudent" },
+      "description": "Collection of newly added students with unique 6-digit activation codes"
     }
   }
 }

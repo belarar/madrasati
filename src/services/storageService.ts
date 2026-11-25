@@ -41,6 +41,7 @@ import {
   deletePrivateConversationFromFirestore,
   deleteSummonFromFirestore,
   fetchAllStaffPinsFromFirestore,
+  fetchCustomStudentsFromFirestore,
   fetchFilePayloadFromFirestore,
   fetchStaffPinFromFirestore,
   incrementDownloadCountInFirestore,
@@ -53,6 +54,7 @@ import {
   rejectPasswordResetRequestInFirestore,
   resolvePendingResetRequestsForIdentifierInFirestore,
   saveAnnouncementToFirestore,
+  saveCustomStudentToFirestore,
   saveDocumentToFirestore,
   savePasswordResetRequestToFirestore,
   savePeerPostToFirestore,
@@ -441,6 +443,28 @@ export function initStorage(): void {
           }
         }
       },
+      onCustomStudents: (liveCustomStudents) => {
+        if (Array.isArray(liveCustomStudents) && liveCustomStudents.length > 0) {
+          const currentCustom = getCustomStudents();
+          const map = new Map<string, UserProfile>();
+          for (const s of currentCustom) {
+            map.set(normalizeIdentifier(s.identifier), s);
+          }
+          let changed = false;
+          for (const incoming of liveCustomStudents) {
+            const key = normalizeIdentifier(incoming.identifier);
+            if (!map.has(key)) {
+              map.set(key, incoming);
+              changed = true;
+            }
+          }
+          if (changed) {
+            safeSetItem(STORAGE_KEYS.CUSTOM_STUDENTS, JSON.stringify(Array.from(map.values())));
+            window.dispatchEvent(new Event('custom-students-change'));
+            window.dispatchEvent(new Event('auth-change'));
+          }
+        }
+      },
     });
 
     // Seed baseline data to cloud database if empty
@@ -701,6 +725,16 @@ export function addCustomStudent(params: {
     ? users.map(u => (normalizeIdentifier(u.identifier) === cleanId ? studentUser : u))
     : [studentUser, ...users];
   safeSetItem(STORAGE_KEYS.USERS, JSON.stringify(updatedUsers));
+
+  // Persist across all devices via Cloud Firestore & Express backend
+  saveCustomStudentToFirestore(studentUser).catch(() => {});
+  fetch('/api/custom-students', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(studentUser),
+  }).catch(() => {});
+
+  window.dispatchEvent(new Event('custom-students-change'));
   window.dispatchEvent(new Event('auth-change'));
   return studentUser;
 }
@@ -772,6 +806,52 @@ export function authenticateStudentByActivationCode(
     success: false,
     message: `⛔ رمز التفعيل (${normalized}) غير صحيح أو غير مسجل في قائمة رموز تلاميذ متوسطة الشهيد بن نعمة مصطفى. يرجى التثبت من الرمز المسلم لك من الإدارة أو الناظرة.`,
   };
+}
+
+export async function authenticateStudentByActivationCodeAsync(
+  rawCode: string
+): Promise<{ success: boolean; user?: UserProfile; message?: string }> {
+  const localAttempt = authenticateStudentByActivationCode(rawCode);
+  if (localAttempt.success) return localAttempt;
+
+  const normalized = normalizeIdentifier(rawCode || '').replace(/[^0-9a-z]/g, '');
+  if (!/^\d{6}$/.test(normalized)) return localAttempt;
+
+  // Fetch latest custom-added students from Firestore & Server in case Director added student on another device
+  try {
+    const [firestoreList, serverList] = await Promise.all([
+      fetchCustomStudentsFromFirestore().catch(() => [] as UserProfile[]),
+      fetch('/api/custom-students')
+        .then(r => (r.ok ? r.json() : []))
+        .catch(() => [] as UserProfile[]),
+    ]);
+
+    const combined = [...(Array.isArray(firestoreList) ? firestoreList : []), ...(Array.isArray(serverList) ? serverList : [])];
+    if (combined.length > 0) {
+      const existing = getCustomStudents();
+      const map = new Map<string, UserProfile>();
+      for (const s of existing) map.set(normalizeIdentifier(s.identifier), s);
+      let changed = false;
+      for (const incoming of combined) {
+        if (incoming && incoming.identifier && incoming.activationCode) {
+          const key = normalizeIdentifier(incoming.identifier);
+          if (!map.has(key)) {
+            map.set(key, incoming);
+            changed = true;
+          }
+        }
+      }
+      if (changed) {
+        safeSetItem(STORAGE_KEYS.CUSTOM_STUDENTS, JSON.stringify(Array.from(map.values())));
+        window.dispatchEvent(new Event('custom-students-change'));
+        window.dispatchEvent(new Event('auth-change'));
+      }
+    }
+  } catch {
+    // Fallback to local result
+  }
+
+  return authenticateStudentByActivationCode(rawCode);
 }
 
 // Legacy dual authentication kept exported for compatibility
@@ -2741,6 +2821,39 @@ export async function syncWithServer(): Promise<void> {
         if (prevStr !== nextStr) {
           safeSetItem(STORAGE_KEYS.PASSWORD_RESET_REQUESTS, JSON.stringify(mergedReqs));
           window.dispatchEvent(new CustomEvent('password-requests-updated'));
+        }
+      }
+
+      // 5c. Custom Newly Added Students Sync
+      if (Array.isArray(data.customStudents)) {
+        const localCustom = getCustomStudents();
+        const serverIds = new Set(
+          data.customStudents.map((s: UserProfile) => normalizeIdentifier(s.identifier))
+        );
+        const unsyncedCustom = localCustom.filter(
+          s => !serverIds.has(normalizeIdentifier(s.identifier))
+        );
+        for (const un of unsyncedCustom) {
+          fetch('/api/custom-students', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(un),
+          }).catch(() => {});
+        }
+        const map = new Map<string, UserProfile>();
+        for (const s of data.customStudents) {
+          if (s && s.identifier && s.activationCode) {
+            map.set(normalizeIdentifier(s.identifier), s);
+          }
+        }
+        for (const s of unsyncedCustom) {
+          map.set(normalizeIdentifier(s.identifier), s);
+        }
+        const mergedCustom = Array.from(map.values());
+        if (JSON.stringify(localCustom.map(s => s.identifier)) !== JSON.stringify(mergedCustom.map(s => s.identifier))) {
+          safeSetItem(STORAGE_KEYS.CUSTOM_STUDENTS, JSON.stringify(mergedCustom));
+          window.dispatchEvent(new Event('custom-students-change'));
+          window.dispatchEvent(new Event('auth-change'));
         }
       }
     }

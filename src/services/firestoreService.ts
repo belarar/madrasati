@@ -19,6 +19,7 @@ import {
   SchoolAnnouncement,
   SchoolDocument,
   UserPresenceRecord,
+  UserProfile,
 } from '../types';
 
 export enum OperationType {
@@ -64,6 +65,7 @@ const privateMsgCol = collection(firestore, 'private_messages');
 const resetRequestsCol = collection(firestore, 'password_reset_requests');
 const staffPinsCol = collection(firestore, 'staff_pins');
 const presenceCol = collection(firestore, 'user_presence');
+const customStudentsCol = collection(firestore, 'custom_students');
 
 export interface FirestorePasswordResetRequest {
   id: string;
@@ -93,6 +95,7 @@ export function initFirestoreRealtimeSync(callbacks: {
   onNotifications: (notifs: AppNotification[]) => void;
   onPasswordResetRequests?: (requests: FirestorePasswordResetRequest[]) => void;
   onStaffPins?: (pins: Record<string, FirestoreStaffPinRecord>) => void;
+  onCustomStudents?: (students: UserProfile[]) => void;
 }) {
   if (isInitialized) return;
   isInitialized = true;
@@ -216,6 +219,33 @@ export function initFirestoreRealtimeSync(callbacks: {
         callbacks.onStaffPins?.(pins);
       },
       err => console.warn('[Firestore] Staff pins subscription warning:', err)
+    );
+  }
+
+  // 8. Custom Students real-time listener (Ensures newly added students can log in from any device)
+  if (callbacks.onCustomStudents) {
+    onSnapshot(
+      customStudentsCol,
+      snapshot => {
+        const list: UserProfile[] = [];
+        snapshot.forEach(d => {
+          const data = d.data() as Partial<UserProfile>;
+          if (data && data.identifier && data.name && data.activationCode) {
+            list.push({
+              id: data.id || `student-${data.identifier}`,
+              identifier: data.identifier,
+              name: data.name,
+              role: 'student',
+              classId: data.classId || '4AM-1',
+              className: data.className || 'رابعة متوسط 01',
+              activationCode: data.activationCode,
+              title: data.title || `تلميذ(ة) بقسم ${data.className || 'رابعة متوسط 01'}`,
+            });
+          }
+        });
+        callbacks.onCustomStudents?.(list);
+      },
+      err => handleFirestoreError(err, OperationType.LIST, 'custom_students')
     );
   }
 }
@@ -791,3 +821,54 @@ export function initPresenceRealtimeSync(
     }
   );
 }
+
+// ================= Custom Newly Added Students =================
+export async function saveCustomStudentToFirestore(student: UserProfile): Promise<void> {
+  if (!student.identifier || !student.activationCode) return;
+  const docId = student.identifier.trim().toLowerCase().replace(/[^a-z0-9_-]/g, '_');
+  try {
+    await setDoc(
+      doc(firestore, 'custom_students', docId),
+      {
+        id: student.id,
+        identifier: student.identifier,
+        name: student.name,
+        role: 'student',
+        classId: student.classId || '4AM-1',
+        className: student.className || 'رابعة متوسط 01',
+        activationCode: student.activationCode,
+        title: student.title || `تلميذ(ة) بقسم ${student.className || 'رابعة متوسط 01'}`,
+      },
+      { merge: true }
+    );
+  } catch (err) {
+    handleFirestoreError(err, OperationType.WRITE, `custom_students/${docId}`);
+  }
+}
+
+export async function fetchCustomStudentsFromFirestore(): Promise<UserProfile[]> {
+  try {
+    const snap = await getDocs(customStudentsCol);
+    const list: UserProfile[] = [];
+    snap.forEach(d => {
+      const data = d.data() as Partial<UserProfile>;
+      if (data && data.identifier && data.name && data.activationCode) {
+        list.push({
+          id: data.id || `student-${data.identifier}`,
+          identifier: data.identifier,
+          name: data.name,
+          role: 'student',
+          classId: data.classId || '4AM-1',
+          className: data.className || 'رابعة متوسط 01',
+          activationCode: data.activationCode,
+          title: data.title || `تلميذ(ة) بقسم ${data.className || 'رابعة متوسط 01'}`,
+        });
+      }
+    });
+    return list;
+  } catch (err) {
+    handleFirestoreError(err, OperationType.LIST, 'custom_students');
+    return [];
+  }
+}
+

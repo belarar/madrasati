@@ -494,7 +494,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <UserCheck className="w-4 h-4 text-emerald-600" />
+            <UserCheck className={`w-4 h-4 shrink-0 ${activeTab === 'my_teachers' ? 'text-yellow-300' : 'text-emerald-600'}`} />
             <span>أساتذة قسمي المعتمدون ({classTeachers.length})</span>
           </button>
 
@@ -506,7 +506,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <MessageCircle className="w-4 h-4 text-emerald-600" />
+            <MessageCircle className={`w-4 h-4 shrink-0 ${activeTab === 'private_chat' ? 'text-yellow-300' : 'text-emerald-600'}`} />
             <span>محادثات الزملاء المباشرة 💬</span>
             <span className="text-[10px] bg-amber-100 text-amber-900 border border-amber-300 px-2 py-0.5 rounded-full font-bold">
               {conversationsCount > 0 ? `${conversationsCount} محادثة • مراقبة` : 'مراقبة تربوياً'}
@@ -521,7 +521,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Users className="w-4 h-4 text-emerald-600" />
+            <Users className={`w-4 h-4 shrink-0 ${activeTab === 'peer_exchange' ? 'text-yellow-300' : 'text-emerald-600'}`} />
             <span>قناة الزملاء وتبادل الدروس</span>
             <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">
               {classPeerPosts.length}
@@ -536,7 +536,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Bell className="w-4 h-4" />
+            <Bell className="w-4 h-4 shrink-0" />
             <span>الإعلانات والتوجيهات</span>
             {unreadAnnouncements.length > 0 && (
               <span className="text-[10px] bg-amber-500 text-white px-2 py-0.5 rounded-full font-bold">
@@ -554,7 +554,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
                   : 'bg-amber-50 text-amber-900 border border-amber-300 hover:bg-amber-100'
               }`}
             >
-              <AlertTriangle className="w-4 h-4 text-amber-500" />
+              <AlertTriangle className={`w-4 h-4 shrink-0 ${activeTab === 'summons' ? 'text-white' : 'text-amber-600'}`} />
               <span>استدعاءات الولي ({studentSummons.length})</span>
             </button>
           )}

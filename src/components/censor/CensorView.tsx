@@ -54,6 +54,7 @@ import {
   SummonReason,
   UserProfile,
 } from '../../types';
+import { AddStudentModal } from '../common/AddStudentModal';
 import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
 import { SummonModal } from '../common/SummonModal';
@@ -78,6 +79,8 @@ export const CensorView: React.FC<CensorViewProps> = ({
     'supervisors' | 'new-supervisor-summon' | 'summons' | 'new-summon' | 'announcements' | 'new-announcement' | 'student-codes' | 'chat-supervision'
   >('supervisors');
   const [selectedSummonModal, setSelectedSummonModal] = useState<ParentSummon | null>(null);
+  const [showAddStudentModal, setShowAddStudentModal] = useState(false);
+  const [studentRefreshSignal, setStudentRefreshSignal] = useState(0);
 
   // Supervisors (مشرفو التربية الخاضعون لمسؤولية الناظرة)
   const supervisors = getSupervisorsList();
@@ -339,89 +342,89 @@ export const CensorView: React.FC<CensorViewProps> = ({
 
       {/* Tabs */}
       <div className="print:hidden flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setActiveTab('supervisors')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'supervisors'
                 ? 'bg-teal-800 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Users className="w-4 h-4 text-teal-400" />
+            <Users className={`w-4 h-4 shrink-0 ${activeTab === 'supervisors' ? 'text-yellow-300' : 'text-teal-700'}`} />
             <span>مشرفو التربية المسندون ({supervisors.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('new-supervisor-summon')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'new-supervisor-summon'
                 ? 'bg-teal-800 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Send className="w-4 h-4" />
-            <span>استدعاء / تكليف مشرف تربية ➕</span>
+            <Send className="w-4 h-4 shrink-0" />
+            <span>استدعاء / تكليف مشرف تربية</span>
           </button>
 
           <button
             onClick={() => setActiveTab('summons')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'summons'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <MessageCircle className="w-4 h-4 text-emerald-300" />
-            <span>استدعاءات أولياء التلاميذ ({summons.length})</span>
+            <MessageCircle className={`w-4 h-4 shrink-0 ${activeTab === 'summons' ? 'text-yellow-300' : 'text-emerald-700'}`} />
+            <span>استدعاءات الأولياء ({summons.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('new-summon')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'new-summon'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Plus className="w-4 h-4" />
+            <Plus className="w-4 h-4 shrink-0" />
             <span>استدعاء ولي أمر جديد</span>
           </button>
 
           <button
             onClick={() => setActiveTab('announcements')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'announcements'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Bell className="w-4 h-4" />
+            <Bell className="w-4 h-4 shrink-0" />
             <span>إعلانات التلاميذ ({censorAnnouncements.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('student-codes')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'student-codes'
                 ? 'bg-emerald-800 text-white shadow-md ring-2 ring-emerald-500/40'
                 : 'bg-amber-50 text-amber-950 border border-amber-300 hover:bg-amber-100'
             }`}
           >
-            <KeyRound className={`w-4 h-4 ${activeTab === 'student-codes' ? 'text-yellow-300' : 'text-amber-700'}`} />
+            <KeyRound className={`w-4 h-4 shrink-0 ${activeTab === 'student-codes' ? 'text-yellow-300' : 'text-amber-700'}`} />
             <span>رموز تفعيل التلاميذ (6 أرقام)</span>
           </button>
 
           <button
             onClick={() => setActiveTab('chat-supervision')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'chat-supervision'
                 ? 'bg-teal-800 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Shield className="w-4 h-4 text-teal-600" />
-            <span>مراقبة محادثات التلاميذ 🛡️</span>
+            <Shield className={`w-4 h-4 shrink-0 ${activeTab === 'chat-supervision' ? 'text-yellow-300' : 'text-teal-700'}`} />
+            <span>مراقبة محادثات التلاميذ</span>
             <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
               رقابة تربوية
             </span>
@@ -1436,13 +1439,26 @@ export const CensorView: React.FC<CensorViewProps> = ({
 
       {/* Tab: Student Activation Codes Directory */}
       {activeTab === 'student-codes' && (
-        <StudentActivationCodesManager />
+        <StudentActivationCodesManager
+          onOpenAddStudent={() => setShowAddStudentModal(true)}
+          refreshSignal={studentRefreshSignal}
+        />
       )}
 
       {/* Tab: Student Chat Supervision */}
       {activeTab === 'chat-supervision' && (
         <StudentChatSupervisionPanel currentUser={currentUser} />
       )}
+
+      {/* Add Student Modal */}
+      <AddStudentModal
+        isOpen={showAddStudentModal}
+        onClose={() => setShowAddStudentModal(false)}
+        onStudentAdded={() => {
+          setStudentRefreshSignal(s => s + 1);
+          onRefreshData();
+        }}
+      />
 
       {/* Document Preview Modal */}
       <DocumentPreviewModal

@@ -32,7 +32,6 @@ import {
 } from 'lucide-react';
 import { MOCK_USERS, SCHOOL_CLASSES, SCHOOL_NAME, SUBJECTS } from '../../data/mockData';
 import {
-  addCustomStudent,
   deleteAnnouncement,
   deleteDocument,
   getAllUsers,
@@ -57,6 +56,7 @@ import {
   UserPresenceRecord,
   UserProfile,
 } from '../../types';
+import { AddStudentModal } from '../common/AddStudentModal';
 import { AnnouncementCard } from '../common/AnnouncementCard';
 import { DocumentCard } from '../common/DocumentCard';
 import { DocumentPreviewModal } from '../common/DocumentPreviewModal';
@@ -122,9 +122,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
   // Student Roster States
   const [studentSearch, setStudentSearch] = useState('');
   const [showAddStudentModal, setShowAddStudentModal] = useState(false);
-  const [newStudentName, setNewStudentName] = useState('');
-  const [newStudentClass, setNewStudentClass] = useState('4AM-1');
-  const [studentAddedSuccess, setStudentAddedSuccess] = useState<string | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -370,32 +367,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
     }, 1800);
   };
 
-  const handleAddStudent = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newStudentName.trim()) return;
-
-    const generatedInternalId = `STD-${Date.now()}-${Math.floor(100 + Math.random() * 900)}`;
-    const selectedCls = SCHOOL_CLASSES.find(c => c.id === newStudentClass);
-    const createdStudent = addCustomStudent({
-      identifier: generatedInternalId,
-      name: newStudentName.trim(),
-      classId: newStudentClass,
-      className: selectedCls?.name || 'رابعة متوسط 01',
-    });
-
-    setStudentAddedSuccess(
-      `تمت إضافة التلميذ(ة) "${newStudentName}" بنجاح! رمز التفعيل (6 أرقام): ${createdStudent.activationCode}`
-    );
-    setNewStudentName('');
-    setStudentRefreshSignal(s => s + 1);
-    onRefreshData();
-
-    setTimeout(() => {
-      setStudentAddedSuccess(null);
-      setShowAddStudentModal(false);
-    }, 2800);
-  };
-
   const totalDownloads = documents.reduce((acc, d) => acc + (d.downloadCount || 0), 0);
   const totalStudentsApprox = SCHOOL_CLASSES.reduce((acc, c) => acc + c.studentCount, 0);
 
@@ -606,70 +577,74 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       )}
 
       {/* Tabs */}
-      <div className="print:hidden flex flex-wrap items-center justify-between gap-4 border-b border-slate-200 pb-3">
-        <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      <div className="print:hidden flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 pb-3">
+        <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setActiveTab('announcements')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'announcements'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Bell className="w-4 h-4" />
+            <Bell className="w-4 h-4 shrink-0" />
             <span>لوحة الإعلانات الرسمية ({announcements.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('new-announcement')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'new-announcement'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Megaphone className="w-4 h-4" />
-            <span>نشر إعلان جديد (للتلاميذ / الأساتذة / الموظفين)</span>
+            <Megaphone className="w-4 h-4 shrink-0" />
+            <span>نشر إعلان جديد</span>
           </button>
 
           <button
             onClick={() => setActiveTab('documents')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'documents'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <FolderOpen className="w-4 h-4" />
-            <span>بنك الوثائق والمنشورات ({documents.length})</span>
+            <FolderOpen className="w-4 h-4 shrink-0" />
+            <span>بنك الوثائق ({documents.length})</span>
           </button>
 
           <button
             onClick={() => setActiveTab('upload-doc')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'upload-doc'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <FileUp className="w-4 h-4" />
-            <span>تحميل ونشر وثيقة إدارية</span>
+            <FileUp className="w-4 h-4 shrink-0" />
+            <span>نشر وثيقة إدارية</span>
           </button>
 
           <button
             onClick={() => setActiveTab('staff-accounts')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'staff-accounts'
                 ? 'bg-emerald-800 text-white shadow-md ring-2 ring-emerald-500/40'
                 : 'bg-emerald-50 text-emerald-950 border border-emerald-300 hover:bg-emerald-100'
             }`}
           >
-            <KeyRound className="w-4 h-4 text-emerald-700" />
-            <span>حسابات وكلمات سر الموظفين (42)</span>
+            <KeyRound
+              className={`w-4 h-4 shrink-0 ${
+                activeTab === 'staff-accounts' ? 'text-yellow-300' : 'text-emerald-700'
+              }`}
+            />
+            <span>حسابات الموظفين (42)</span>
             {pendingResetCount > 0 ? (
               <span className="text-[10px] bg-rose-600 text-white font-black px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1 shadow-xs">
                 <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
-                <span>{pendingResetCount} طلب تفعيل معلق</span>
+                <span>{pendingResetCount} طلب معلق</span>
               </span>
             ) : (
               <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-1.5 py-0.5 rounded-full">
@@ -680,13 +655,17 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
           <button
             onClick={() => setActiveTab('student-codes')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'student-codes'
                 ? 'bg-emerald-800 text-white shadow-md ring-2 ring-emerald-500/40'
                 : 'bg-amber-50 text-amber-950 border border-amber-300 hover:bg-amber-100'
             }`}
           >
-            <KeyRound className={`w-4 h-4 ${activeTab === 'student-codes' ? 'text-yellow-300' : 'text-amber-700'}`} />
+            <KeyRound
+              className={`w-4 h-4 shrink-0 ${
+                activeTab === 'student-codes' ? 'text-yellow-300' : 'text-amber-700'
+              }`}
+            />
             <span>رموز تفعيل التلاميذ (6 أرقام)</span>
             <span className="text-[10px] bg-emerald-700 text-white font-black px-2 py-0.5 rounded-full">
               {registeredStudents.length}
@@ -695,7 +674,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
           <button
             onClick={() => setActiveTab('online-users')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 cursor-pointer ${
               activeTab === 'online-users'
                 ? 'bg-emerald-700 text-white shadow-md ring-2 ring-emerald-400/40'
                 : 'bg-emerald-50 text-emerald-950 border border-emerald-300 hover:bg-emerald-100'
@@ -719,41 +698,55 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
 
           <button
             onClick={() => setActiveTab('roster')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'roster'
                 ? 'bg-emerald-700 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Users className="w-4 h-4" />
-            <span>دليل الطاقم التربوي والأقسام</span>
+            <Users className="w-4 h-4 shrink-0" />
+            <span>دليل الطاقم والأقسام</span>
           </button>
 
           <button
             onClick={() => setActiveTab('chat-supervision')}
-            className={`flex items-center gap-2 px-4 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
+            className={`flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-xs sm:text-sm font-bold transition-all shrink-0 ${
               activeTab === 'chat-supervision'
                 ? 'bg-teal-800 text-white shadow-xs'
                 : 'bg-white text-slate-700 border border-slate-200 hover:bg-slate-50'
             }`}
           >
-            <Shield className="w-4 h-4 text-teal-600" />
-            <span>مراقبة محادثات التلاميذ 🛡️</span>
+            <Shield
+              className={`w-4 h-4 shrink-0 ${
+                activeTab === 'chat-supervision' ? 'text-yellow-300' : 'text-teal-700'
+              }`}
+            />
+            <span>مراقبة محادثات التلاميذ</span>
             <span className="text-[10px] bg-amber-400 text-slate-950 font-black px-2 py-0.5 rounded-full">
               رقابة تربوية
             </span>
           </button>
         </div>
 
-        {/* Diagnostic Storage Debug Button */}
-        <div className="flex items-center gap-2 shrink-0">
+        {/* Quick Actions: Add New Student + Diagnostic Storage Debug Button */}
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => setShowAddStudentModal(true)}
+            className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-black transition-all bg-emerald-700 hover:bg-emerald-800 text-white shadow-xs active:scale-95 cursor-pointer"
+            title="إضافة تلميذ جديد وتوليد رمز تفعيل من 6 أرقام فوراً"
+          >
+            <Plus className="w-4 h-4 text-yellow-300" />
+            <span>إضافة تلميذ + رمز تفعيل</span>
+          </button>
+
           <button
             onClick={() => setShowDebugModal(true)}
             className="flex items-center gap-1.5 px-3.5 py-2.5 rounded-xl text-xs font-bold transition-all bg-amber-50 hover:bg-amber-100 text-amber-950 border border-amber-300 shadow-2xs active:scale-95 cursor-pointer"
             title="فحص محتويات localStorage والبيانات الخام وتشخيص مشاكل التخزين"
           >
             <Database className="w-4 h-4 text-amber-700" />
-            <span>فحص قاعدة البيانات (Debug View)</span>
+            <span>فحص قاعدة البيانات</span>
           </button>
         </div>
       </div>
@@ -1675,80 +1668,14 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       )}
 
       {/* Add Student Modal */}
-      {showAddStudentModal && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60 backdrop-blur-xs animate-in fade-in duration-200">
-          <div className="bg-white w-full max-w-md rounded-3xl shadow-2xl border border-slate-200 overflow-hidden">
-            <div className="bg-gradient-to-r from-emerald-800 to-teal-800 text-white p-5 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <GraduationCap className="w-5 h-5 text-emerald-300" />
-                <h3 className="font-bold text-base">إضافة تلميذ جديد للقائمة المدرسية</h3>
-              </div>
-              <button
-                type="button"
-                onClick={() => setShowAddStudentModal(false)}
-                className="text-white/80 hover:text-white p-1 rounded-full hover:bg-white/10"
-              >
-                <X className="w-5 h-5" />
-              </button>
-            </div>
-
-            {studentAddedSuccess && (
-              <div className="p-3 bg-emerald-50 border-b border-emerald-200 text-emerald-900 font-bold text-xs text-center">
-                {studentAddedSuccess}
-              </div>
-            )}
-
-            <form onSubmit={handleAddStudent} className="p-6 space-y-4 text-right">
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  اسم ولقب التلميذ(ة): <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="مثال: أمين حدادي"
-                  value={newStudentName}
-                  onChange={e => setNewStudentName(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 outline-none text-sm"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">
-                  القسم والفوج: <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={newStudentClass}
-                  onChange={e => setNewStudentClass(e.target.value)}
-                  className="w-full px-3 py-2.5 rounded-xl border border-slate-300 focus:border-emerald-600 outline-none text-sm bg-white"
-                >
-                  {SCHOOL_CLASSES.map(c => (
-                    <option key={c.id} value={c.id}>
-                      {c.name}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              <div className="flex items-center gap-2 pt-2">
-                <button
-                  type="submit"
-                  className="flex-1 py-2.5 px-4 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white font-bold text-xs shadow-xs"
-                >
-                  إضافة التلميذ وتفعيل دخوله فوراً
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setShowAddStudentModal(false)}
-                  className="px-4 py-2.5 rounded-xl border border-slate-300 text-slate-700 text-xs font-semibold"
-                >
-                  إلغاء
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      <AddStudentModal
+        isOpen={showAddStudentModal}
+        onClose={() => setShowAddStudentModal(false)}
+        onStudentAdded={() => {
+          setStudentRefreshSignal(s => s + 1);
+          onRefreshData();
+        }}
+      />
 
       {/* Tab: Live Online Students & Teachers */}
       {activeTab === 'online-users' && (() => {

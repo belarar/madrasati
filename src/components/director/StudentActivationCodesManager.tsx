@@ -65,7 +65,11 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
     const reload = () => setStudents(getStudentActivationDirectory());
     reload();
     window.addEventListener('auth-change', reload);
-    return () => window.removeEventListener('auth-change', reload);
+    window.addEventListener('custom-students-change', reload);
+    return () => {
+      window.removeEventListener('auth-change', reload);
+      window.removeEventListener('custom-students-change', reload);
+    };
   }, [refreshSignal]);
 
   const classCounts = useMemo(() => {
@@ -504,10 +508,10 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
               <button
                 type="button"
                 onClick={onOpenAddStudent}
-                className="px-3.5 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 text-white text-xs font-bold flex items-center gap-1.5 shadow-xs cursor-pointer"
+                className="px-4 py-2 rounded-xl bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-black flex items-center gap-1.5 shadow-sm cursor-pointer"
               >
                 <Plus className="w-4 h-4 text-yellow-300" />
-                <span>إضافة تلميذ جديد</span>
+                <span>إضافة تلميذ جديد + رمز تفعيل</span>
               </button>
             )}
 
@@ -590,12 +594,17 @@ export const StudentActivationCodesManager: React.FC<StudentActivationCodesManag
           </div>
         </div>
 
-        {/* Security Note */}
+        {/* Security Note & Add Student Quick Guide */}
         <div className="bg-amber-50/90 border border-amber-200 rounded-2xl p-3 text-xs text-amber-950 flex items-start gap-2.5">
           <ShieldCheck className="w-4 h-4 text-amber-700 shrink-0 mt-0.5" />
-          <span>
-            <strong>تنبيه تنظيمي:</strong> هذه القائمة مخصصة للسيد المدير والسيدة الناظرة فقط لتوزيع رموز التفعيل على التلاميذ. يُستحسن اختيار القسم الدراسي ثم الضغط على <strong>"قصاصات التوزيع الفردية"</strong> لطباعة قصاصة فردية لكل تلميذ تحوي رابط المنصة ورمزه السري.
-          </span>
+          <div className="space-y-1">
+            <p>
+              <strong>تنبيه تنظيمي:</strong> هذه القائمة مخصصة للسيد المدير والسيدة الناظرة فقط لتوزيع رموز التفعيل على التلاميذ. يُستحسن اختيار القسم الدراسي ثم الضغط على <strong>"قصاصات التوزيع الفردية"</strong> لطباعة قصاصة فردية لكل تلميذ تحوي رابط المنصة ورمزه السري.
+            </p>
+            <p className="text-[11px] text-emerald-950 font-semibold">
+              <strong>لإضافة تلميذ جديد ومنحه رمز تفعيل:</strong> اضغط على زر <strong>«إضافة تلميذ جديد + رمز تفعيل»</strong> أعلاه، أدخل الاسم واللقب واختر القسم، وسيولّد النظام تلقائياً رمز تفعيل من 6 أرقام جاهزاً للنسخ أو تحميل قصاصة التلميذ فوراً.
+            </p>
+          </div>
         </div>
 
         {/* Platform URL field included in every printed student slip */}

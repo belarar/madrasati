@@ -47,6 +47,7 @@ export interface SchoolDatabase {
   userCustomPins: Record<string, string>; // identifier -> custom password
   userCustomPinTimestamps?: Record<string, string>; // identifier -> ISO timestamp
   passwordResetRequests: PasswordResetRequest[];
+  customStudents?: any[];
 }
 
 export interface PasswordResetRequest {
@@ -76,6 +77,7 @@ function loadDatabase(): SchoolDatabase {
         if (!parsed.userCustomPinTimestamps) parsed.userCustomPinTimestamps = {};
         if (!Array.isArray(parsed.passwordResetRequests)) parsed.passwordResetRequests = [];
         if (!Array.isArray(parsed.internalStaffSummons)) parsed.internalStaffSummons = [];
+        if (!Array.isArray(parsed.customStudents)) parsed.customStudents = [];
 
         // Seed initial sample conversation between two 2AM-2 classmates if empty
         if (parsed.privateConversations.length === 0) {
@@ -246,6 +248,7 @@ app.get('/api/sync', (req, res) => {
     userCustomPins: db.userCustomPins,
     userCustomPinTimestamps: db.userCustomPinTimestamps || {},
     passwordResetRequests: db.passwordResetRequests || [],
+    customStudents: db.customStudents || [],
     serverTime: new Date().toISOString(),
   });
 });
@@ -260,6 +263,7 @@ app.post('/api/sync', (req, res) => {
     clientMessages = [],
     clientPins = {},
     clientPasswordResetRequests = [],
+    clientCustomStudents = [],
   } = req.body || {};
 
   let changed = false;
@@ -354,6 +358,23 @@ app.post('/api/sync', (req, res) => {
     }
   }
 
+  // Merge newly added custom students
+  if (Array.isArray(clientCustomStudents)) {
+    if (!Array.isArray(db.customStudents)) db.customStudents = [];
+    for (const cStu of clientCustomStudents) {
+      if (cStu && cStu.identifier && cStu.activationCode) {
+        const cleanId = String(cStu.identifier).trim().toLowerCase();
+        const exists = db.customStudents.some(
+          s => String(s.identifier || '').trim().toLowerCase() === cleanId
+        );
+        if (!exists) {
+          db.customStudents.push(cStu);
+          changed = true;
+        }
+      }
+    }
+  }
+
   if (changed) {
     saveDatabase(db);
   }
@@ -369,6 +390,7 @@ app.post('/api/sync', (req, res) => {
     userCustomPins: db.userCustomPins,
     userCustomPinTimestamps: db.userCustomPinTimestamps || {},
     passwordResetRequests: db.passwordResetRequests || [],
+    customStudents: db.customStudents || [],
     serverTime: new Date().toISOString(),
   });
 });
@@ -1142,6 +1164,30 @@ app.delete('/api/password-reset-requests/:id', (req, res) => {
   db.passwordResetRequests = db.passwordResetRequests.filter(r => r.id !== id);
   saveDatabase(db);
   res.json({ success: true });
+});
+
+// ================= CUSTOM NEWLY ADDED STUDENTS =================
+app.get('/api/custom-students', (_req, res) => {
+  res.json(Array.isArray(db.customStudents) ? db.customStudents : []);
+});
+
+app.post('/api/custom-students', (req, res) => {
+  const student = req.body;
+  if (!student || !student.identifier || !student.name || !student.activationCode) {
+    return res.status(400).json({ error: 'بيانات التلميذ غير مكتملة.' });
+  }
+  if (!Array.isArray(db.customStudents)) db.customStudents = [];
+  const cleanId = String(student.identifier).trim().toLowerCase();
+  const idx = db.customStudents.findIndex(
+    s => String(s.identifier || '').trim().toLowerCase() === cleanId
+  );
+  if (idx >= 0) {
+    db.customStudents[idx] = { ...db.customStudents[idx], ...student };
+  } else {
+    db.customStudents.push(student);
+  }
+  saveDatabase(db);
+  res.status(201).json({ success: true, student });
 });
 
 // ================= REAL-TIME LIVE PRESENCE TRACKING =================
