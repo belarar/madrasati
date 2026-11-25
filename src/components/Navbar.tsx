@@ -127,7 +127,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   const handleManualSync = async () => {
     setManualSyncing(true);
     try {
-      await syncWithServer();
+      await syncWithServer(true);
     } catch {}
     setTimeout(() => {
       setManualSyncing(false);

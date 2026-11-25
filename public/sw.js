@@ -1,5 +1,5 @@
 // Service Worker for Ben Naama School Digital Platform
-const CACHE_NAME = 'ben-naama-v5';
+const CACHE_NAME = 'ben-naama-v6';
 const ASSETS_TO_CACHE = [
   '/manifest.json',
   '/favicon.ico',
@@ -32,16 +32,15 @@ self.addEventListener('activate', (event) => {
   self.clients.claim();
 });
 
-// Network-first for HTML, JS, CSS, and APIs so mobile users always get fresh code & live announcements
+// Network-first for HTML, JS, CSS, and bypass SW completely for live /api/ requests
 self.addEventListener('fetch', (event) => {
   if (event.request.method !== 'GET') return;
 
   const url = new URL(event.request.url);
   if (url.origin !== self.location.origin) return;
 
-  // Never cache API calls
+  // Let browser handle live API calls directly without Service Worker wrapping
   if (url.pathname.startsWith('/api/')) {
-    event.respondWith(fetch(event.request, { cache: 'no-store' }));
     return;
   }
 

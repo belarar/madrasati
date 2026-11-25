@@ -2,6 +2,7 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
+import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -210,7 +211,10 @@ function loadDatabase(): SchoolDatabase {
   return initialDb;
 }
 
+let dbVersion = Date.now();
+
 function saveDatabase(data: SchoolDatabase): void {
+  dbVersion += 1;
   try {
     if (!fs.existsSync(DATA_DIR)) {
       fs.mkdirSync(DATA_DIR, { recursive: true });
@@ -248,10 +252,22 @@ app.get('/api/health', (req, res) => {
 
 // 2. Comprehensive Bi-Directional Multi-Device Sync
 app.get('/api/sync', (req, res) => {
+  const knownVersionRaw = typeof req.query.knownVersion === 'string' ? Number(req.query.knownVersion) : NaN;
+  const serverTime = new Date().toISOString();
+
+  if (!Number.isNaN(knownVersionRaw) && knownVersionRaw === dbVersion) {
+    return res.json({
+      unchanged: true,
+      version: dbVersion,
+      serverTime,
+    });
+  }
+
   const sortedAnnouncements = [...(db.announcements || [])].sort(
     (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
   );
-  res.json({
+  const payload = {
+    version: dbVersion,
     documents: db.documents,
     announcements: sortedAnnouncements,
     deletedAnnouncementIds: db.deletedAnnouncementIds || [],
@@ -264,8 +280,22 @@ app.get('/api/sync', (req, res) => {
     userCustomPinTimestamps: db.userCustomPinTimestamps || {},
     passwordResetRequests: db.passwordResetRequests || [],
     customStudents: db.customStudents || [],
-    serverTime: new Date().toISOString(),
-  });
+    serverTime,
+  };
+
+  const acceptEncoding = String(req.headers['accept-encoding'] || '');
+  if (acceptEncoding.includes('gzip')) {
+    try {
+      const compressed = zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf-8'));
+      res.setHeader('Content-Encoding', 'gzip');
+      res.setHeader('Content-Type', 'application/json; charset=utf-8');
+      return res.send(compressed);
+    } catch {
+      // Fallback to standard JSON
+    }
+  }
+
+  return res.json(payload);
 });
 
 app.post('/api/sync', (req, res) => {

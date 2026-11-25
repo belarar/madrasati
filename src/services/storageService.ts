@@ -623,24 +623,24 @@ export function initStorage(): void {
   }
 
   // Start real-time server synchronization across devices
-  syncWithServer();
+  syncWithServer(true);
   if (!(window as any).__benNaamaSyncInterval) {
     (window as any).__benNaamaSyncInterval = setInterval(() => {
-      syncWithServer().catch(() => {});
+      syncWithServer(false).catch(() => {});
     }, 2500);
     window.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
-        syncWithServer().catch(() => {});
+        syncWithServer(true).catch(() => {});
       }
     });
     window.addEventListener('focus', () => {
-      syncWithServer().catch(() => {});
+      syncWithServer(true).catch(() => {});
     });
     window.addEventListener('pageshow', () => {
-      syncWithServer().catch(() => {});
+      syncWithServer(true).catch(() => {});
     });
     window.addEventListener('online', () => {
-      syncWithServer().catch(() => {});
+      syncWithServer(true).catch(() => {});
     });
     window.addEventListener('offline', () => {
       updateSyncStatus('offline');
@@ -2947,18 +2947,40 @@ async function fetchWithTimeout(
 let isSyncing = false;
 let resyncRequested = false;
 let inFlightSyncPromise: Promise<void> | null = null;
+let lastServerSyncVersion: number | null = null;
+let consecutiveSyncFailures = 0;
 
 async function runSingleSyncPass(): Promise<void> {
-  const syncRes = await fetchWithTimeout('/api/sync', {}, 8000);
+  const canUseVersionedCheck =
+    lastServerSyncVersion !== null &&
+    cachedDocuments !== null &&
+    cachedAnnouncements !== null &&
+    cachedSummons !== null &&
+    cachedPeerExchanges !== null &&
+    getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS).size === 0;
+
+  const syncEndpoint = canUseVersionedCheck
+    ? `/api/sync?knownVersion=${encodeURIComponent(String(lastServerSyncVersion))}`
+    : '/api/sync';
+
+  const syncRes = await fetchWithTimeout(syncEndpoint, {}, 20000);
 
   if (!syncRes.ok) {
-    updateSyncStatus('offline');
+    consecutiveSyncFailures += 1;
+    if (consecutiveSyncFailures >= 2 || !lastSuccessfulSyncTime) {
+      updateSyncStatus('offline');
+    }
   } else {
+    consecutiveSyncFailures = 0;
     lastSuccessfulSyncTime = Date.now();
     updateSyncStatus('connected');
     const contentType = syncRes.headers.get('content-type') || '';
     if (contentType.includes('application/json')) {
       const data = await syncRes.json();
+
+      if (typeof data.version === 'number') {
+        lastServerSyncVersion = data.version;
+      }
 
       if (data.serverTime) {
         const srvMs = new Date(data.serverTime).getTime();
@@ -2966,6 +2988,8 @@ async function runSingleSyncPass(): Promise<void> {
           serverClockOffsetMs = srvMs - Date.now();
         }
       }
+
+      if (!data.unchanged) {
 
       // 1. Documents: Intelligently merge server documents with any local docs
       if (Array.isArray(data.documents)) {
@@ -3270,33 +3294,36 @@ async function runSingleSyncPass(): Promise<void> {
           window.dispatchEvent(new Event('auth-change'));
         }
       }
+      }
     }
   }
 
   // 6. User Notifications (Merge instead of overwriting so local/Firestore/Server stay in sync)
   const user = getCurrentUser();
-  const query = new URLSearchParams();
-  if (user) {
-    query.set('userId', user.identifier);
-    query.set('role', user.role);
-    if (user.classId) query.set('classId', user.classId);
-  }
-  const notifsRes = await fetchWithTimeout(`/api/notifications?${query.toString()}`, {}, 8000);
-  if (notifsRes.ok) {
-    const serverNotifs: AppNotification[] = await notifsRes.json();
-    if (Array.isArray(serverNotifs)) {
-      const currentNotifs = getNotifications();
-      const currentIds = new Set(currentNotifs.map(n => n.id));
-      const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
-      const mergedNotifs = mergeNotificationsLists(currentNotifs, serverNotifs);
-
-      safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(mergedNotifs));
-      window.dispatchEvent(new Event('notifications-change'));
-
-      maybeAlertSingleFreshNotification(brandNew);
-      initialNotifsHydrated = true;
+  try {
+    const query = new URLSearchParams();
+    if (user) {
+      query.set('userId', user.identifier);
+      query.set('role', user.role);
+      if (user.classId) query.set('classId', user.classId);
     }
-  }
+    const notifsRes = await fetchWithTimeout(`/api/notifications?${query.toString()}`, {}, 10000);
+    if (notifsRes.ok) {
+      const serverNotifs: AppNotification[] = await notifsRes.json();
+      if (Array.isArray(serverNotifs)) {
+        const currentNotifs = getNotifications();
+        const currentIds = new Set(currentNotifs.map(n => n.id));
+        const brandNew = serverNotifs.filter(n => !currentIds.has(n.id));
+        const mergedNotifs = mergeNotificationsLists(currentNotifs, serverNotifs);
+
+        safeSetItem(STORAGE_KEYS.NOTIFICATIONS, JSON.stringify(mergedNotifs));
+        window.dispatchEvent(new Event('notifications-change'));
+
+        maybeAlertSingleFreshNotification(brandNew);
+        initialNotifsHydrated = true;
+      }
+    }
+  } catch {}
 
   // 7. Student Peer Conversations & Messages Sync (للتلاميذ أو للرقابة الإدارية للمدير والناظر)
   if (user) {
@@ -3309,7 +3336,7 @@ async function runSingleSyncPass(): Promise<void> {
       }
 
       if (syncUrl) {
-        const convSyncRes = await fetchWithTimeout(syncUrl, {}, 8000);
+        const convSyncRes = await fetchWithTimeout(syncUrl, {}, 10000);
         if (convSyncRes.ok) {
           const convData = await convSyncRes.json();
           const serverConvs: PrivateConversation[] = convData.conversations || [];
@@ -3348,19 +3375,26 @@ async function runSingleSyncPass(): Promise<void> {
   }
 }
 
-export async function syncWithServer(): Promise<void> {
+export async function syncWithServer(forceResync: boolean = false): Promise<void> {
   if (typeof window === 'undefined') return;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     updateSyncStatus('offline');
     return;
   }
+  if (forceResync) {
+    lastServerSyncVersion = null;
+  }
   if (isSyncing) {
-    resyncRequested = true;
+    if (forceResync) {
+      resyncRequested = true;
+    }
     return inFlightSyncPromise || Promise.resolve();
   }
 
   isSyncing = true;
-  updateSyncStatus('syncing');
+  if (forceResync || !lastSuccessfulSyncTime) {
+    updateSyncStatus('syncing');
+  }
 
   inFlightSyncPromise = (async () => {
     try {
@@ -3370,13 +3404,24 @@ export async function syncWithServer(): Promise<void> {
       } while (resyncRequested && (typeof navigator === 'undefined' || navigator.onLine));
     } catch (err) {
       console.debug('[Sync] Sync network or transient offline:', err);
-      updateSyncStatus('offline');
+      consecutiveSyncFailures += 1;
+      if (
+        (typeof navigator !== 'undefined' && !navigator.onLine) ||
+        consecutiveSyncFailures >= 2 ||
+        !lastSuccessfulSyncTime
+      ) {
+        updateSyncStatus('offline');
+      }
     } finally {
       isSyncing = false;
       inFlightSyncPromise = null;
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         updateSyncStatus('offline');
-      } else if (lastSuccessfulSyncTime && Date.now() - lastSuccessfulSyncTime < 10000) {
+      } else if (consecutiveSyncFailures === 0 && lastSuccessfulSyncTime) {
+        updateSyncStatus('connected');
+      } else if (consecutiveSyncFailures >= 2) {
+        updateSyncStatus('offline');
+      } else if (lastSuccessfulSyncTime && Date.now() - lastSuccessfulSyncTime < 30000) {
         updateSyncStatus('connected');
       }
     }
