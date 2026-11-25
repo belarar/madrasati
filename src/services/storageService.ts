@@ -3375,6 +3375,15 @@ async function runSingleSyncPass(): Promise<void> {
   }
 }
 
+async function checkServerHealthFallback(): Promise<boolean> {
+  try {
+    const res = await fetchWithTimeout('/api/health', {}, 6000);
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function syncWithServer(forceResync: boolean = false): Promise<void> {
   if (typeof window === 'undefined') return;
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -3404,13 +3413,19 @@ export async function syncWithServer(forceResync: boolean = false): Promise<void
       } while (resyncRequested && (typeof navigator === 'undefined' || navigator.onLine));
     } catch (err) {
       console.debug('[Sync] Sync network or transient offline:', err);
-      consecutiveSyncFailures += 1;
-      if (
-        (typeof navigator !== 'undefined' && !navigator.onLine) ||
-        consecutiveSyncFailures >= 2 ||
-        !lastSuccessfulSyncTime
-      ) {
-        updateSyncStatus('offline');
+      const healthOk = await checkServerHealthFallback();
+      if (healthOk) {
+        consecutiveSyncFailures = 0;
+        lastSuccessfulSyncTime = Date.now();
+        updateSyncStatus('connected');
+      } else {
+        consecutiveSyncFailures += 1;
+        if (
+          (typeof navigator !== 'undefined' && !navigator.onLine) ||
+          consecutiveSyncFailures >= 2
+        ) {
+          updateSyncStatus('offline');
+        }
       }
     } finally {
       isSyncing = false;

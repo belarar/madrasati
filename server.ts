@@ -2,7 +2,6 @@ import express from 'express';
 import { createServer as createViteServer } from 'vite';
 import path from 'path';
 import fs from 'fs';
-import zlib from 'zlib';
 import { fileURLToPath } from 'url';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -266,9 +265,17 @@ app.get('/api/sync', (req, res) => {
   const sortedAnnouncements = [...(db.announcements || [])].sort(
     (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
   );
-  const payload = {
+
+  // Strip heavy base64 document blobs from periodic sync (documents are downloaded on demand via /api/documents/:id/download)
+  const lightDocuments = (db.documents || []).map((d: any) =>
+    d && typeof d.fileDataUrl === 'string' && d.fileDataUrl.length > 200
+      ? { ...d, fileDataUrl: undefined }
+      : d
+  );
+
+  return res.json({
     version: dbVersion,
-    documents: db.documents,
+    documents: lightDocuments,
     announcements: sortedAnnouncements,
     deletedAnnouncementIds: db.deletedAnnouncementIds || [],
     summons: db.summons,
@@ -281,21 +288,7 @@ app.get('/api/sync', (req, res) => {
     passwordResetRequests: db.passwordResetRequests || [],
     customStudents: db.customStudents || [],
     serverTime,
-  };
-
-  const acceptEncoding = String(req.headers['accept-encoding'] || '');
-  if (acceptEncoding.includes('gzip')) {
-    try {
-      const compressed = zlib.gzipSync(Buffer.from(JSON.stringify(payload), 'utf-8'));
-      res.setHeader('Content-Encoding', 'gzip');
-      res.setHeader('Content-Type', 'application/json; charset=utf-8');
-      return res.send(compressed);
-    } catch {
-      // Fallback to standard JSON
-    }
-  }
-
-  return res.json(payload);
+  });
 });
 
 app.post('/api/sync', (req, res) => {
@@ -1339,7 +1332,11 @@ app.get('/api/presence', (req, res) => {
       presenceMap.delete(key);
       continue;
     }
-    if (entry.isOnline && now - entry.lastSeen <= PRESENCE_TTL_MS) {
+    const lastActiveTs = entry.lastActive || entry.lastSeen;
+    if (
+      (entry.isOnline && now - entry.lastSeen <= PRESENCE_TTL_MS) ||
+      now - lastActiveTs <= 30_000
+    ) {
       active.push(entry);
     }
   }

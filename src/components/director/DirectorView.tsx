@@ -1556,7 +1556,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 .map(staff => {
                   const staffDocs = documents.filter(d => d.authorId === staff.id);
                   const staffPresence = presenceById.get(staff.identifier.trim().toLowerCase());
-                  const staffOnline = isPresenceOnline(staffPresence, presenceNowTs);
+                  const staffOnline = isUserConnected(staff.identifier, staffPresence, presenceNowTs);
                   const isSupervisor = staff.title?.includes('مشرف');
                   const isAdmin =
                     staff.role === 'director' ||
@@ -1689,7 +1689,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
               {filteredStudents.map(student => {
                 const studentPresence = presenceById.get(student.identifier.trim().toLowerCase());
-                const studentOnline = isPresenceOnline(studentPresence, presenceNowTs);
+                const studentOnline = isUserConnected(student.identifier, studentPresence, presenceNowTs);
                 return (
                   <div
                     key={student.id}
