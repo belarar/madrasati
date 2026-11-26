@@ -218,7 +218,7 @@ export const DocumentPreviewModal: React.FC<DocumentPreviewModalProps> = ({ doc,
 
             {isLoadingFile ? (
               <div className="py-12 flex flex-col items-center justify-center text-slate-500 gap-2">
-                <Loader2 className="w-6 h-6 animate-spin text-emerald-600" />
+                <Loader2 className="w-6 h-6 text-emerald-600" />
                 <span className="text-xs font-semibold">جارٍ تحميل وتجهيز ملف الوثيقة بدقة كاملة...</span>
               </div>
             ) : isImage && dataUrl ? (

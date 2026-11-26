@@ -42,6 +42,11 @@ import {
   setCurrentUser,
 } from '../../services/storageService';
 import {
+  getAnnouncementTimestampMs,
+  refreshAnnouncementsFromFirestoreServer,
+  subscribeToAnnouncementsFromFirestore,
+} from '../../services/firestoreService';
+import {
   ParentSummon,
   SchoolAnnouncement,
   SchoolDocument,
@@ -87,6 +92,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
     getSeenAnnouncementIds(currentUser.identifier)
   );
   const [showPastAnnouncements, setShowPastAnnouncements] = useState(false);
+  const [liveFirestoreAnns, setLiveFirestoreAnns] = useState<SchoolAnnouncement[] | null>(null);
 
   React.useEffect(() => {
     setSeenAnnIds(getSeenAnnouncementIds(currentUser.identifier));
@@ -103,6 +109,29 @@ export const StudentView: React.FC<StudentViewProps> = ({
       window.removeEventListener('seen-announcements-change', handleSeenAnnsChange);
     };
   }, [currentUser.identifier]);
+
+  // Direct Firestore onSnapshot subscription (newest-first) + automatic fetch when online returns
+  React.useEffect(() => {
+    const unsubscribe = subscribeToAnnouncementsFromFirestore(anns => {
+      setLiveFirestoreAnns(anns);
+    });
+
+    const handleOnline = () => {
+      refreshAnnouncementsFromFirestoreServer()
+        .then(serverAnns => {
+          if (serverAnns.length > 0) {
+            setLiveFirestoreAnns(serverAnns);
+          }
+        })
+        .catch(() => {});
+    };
+
+    window.addEventListener('online', handleOnline);
+    return () => {
+      unsubscribe();
+      window.removeEventListener('online', handleOnline);
+    };
+  }, []);
 
   // Edit Profile States
   const [isEditingProfile, setIsEditingProfile] = useState(false);
@@ -247,15 +276,41 @@ export const StudentView: React.FC<StudentViewProps> = ({
     });
   }, [documents, scopeFilter, studentClassId, currentUser.className, currentUser.identifier, currentUser.name, selectedSubject, selectedType, selectedTeacherId, searchQuery]);
 
-  // Announcements targeted to students or all (sorted newest-first)
+  // Announcements targeted to students or all (from Firestore onSnapshot, sorted newest-first)
   const studentAnnouncements = useMemo(() => {
-    return announcements
+    const sourceAnns = liveFirestoreAnns !== null ? liveFirestoreAnns : announcements;
+    const studentLevel = studentClassId.split('-')[0].trim().toLowerCase();
+    const normClassId = studentClassId.trim().toLowerCase();
+
+    return sourceAnns
       .filter(a => {
         const target = String(a.target || 'all').trim().toLowerCase();
-        return target === 'students' || target === 'all' || target === 'all_students';
+        const isRoleEligible =
+          target === 'students' || target === 'all' || target === 'all_students';
+        if (!isRoleEligible) return false;
+
+        const targetCls = String(a.targetClass || '').trim().toLowerCase();
+        if (
+          targetCls &&
+          targetCls !== 'all' &&
+          targetCls !== 'students' &&
+          targetCls !== 'all_students'
+        ) {
+          return (
+            targetCls === normClassId ||
+            targetCls.replace(/[^a-z0-9]/g, '') === normClassId.replace(/[^a-z0-9]/g, '') ||
+            targetCls === studentLevel ||
+            (currentUser.className &&
+              currentUser.className.toLowerCase().includes(targetCls))
+          );
+        }
+        return true;
       })
-      .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-  }, [announcements]);
+      .sort(
+        (a, b) =>
+          getAnnouncementTimestampMs(b.createdAt) - getAnnouncementTimestampMs(a.createdAt)
+      );
+  }, [liveFirestoreAnns, announcements, studentClassId, currentUser.className]);
 
   const unreadAnnouncements = useMemo(() => {
     return studentAnnouncements.filter(a => !seenAnnIds.includes(a.id));
@@ -391,7 +446,7 @@ export const StudentView: React.FC<StudentViewProps> = ({
             {studentSummons.length > 0 && (
               <button
                 onClick={() => setActiveTab('summons')}
-                className="bg-amber-500/30 hover:bg-amber-500/40 backdrop-blur-md rounded-2xl p-3.5 border border-amber-300/40 min-w-[120px] text-center transition-all animate-pulse"
+                className="bg-amber-500/30 hover:bg-amber-500/40 backdrop-blur-md rounded-2xl p-3.5 border border-amber-300/40 min-w-[120px] text-center transition-all"
               >
                 <span className="text-xs text-amber-200 block mb-0.5 font-bold">استدعاء ولي الأمر</span>
                 <span className="text-2xl font-black text-amber-100">{studentSummons.length}</span>

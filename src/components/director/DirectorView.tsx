@@ -287,6 +287,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
         title: annTitle.trim(),
         content: annContent.trim(),
         target: annTarget,
+        targetClass: annTarget === 'students' ? 'ALL' : annTarget,
         priority: annPriority,
         authorName: `${currentUser.name} (مدير المتوسطة)`,
         authorRole: 'director',
@@ -546,7 +547,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             >
               <span className="text-[11px] text-emerald-100 flex items-center justify-center gap-1.5 mb-0.5 font-bold">
                 <span className="relative flex h-2.5 w-2.5 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_8px_#34d399]" />
                 </span>
                 <span>تلاميذ متصلون</span>
@@ -564,7 +564,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             >
               <span className="text-[11px] text-emerald-100 flex items-center justify-center gap-1.5 mb-0.5 font-bold">
                 <span className="relative flex h-2.5 w-2.5 shrink-0">
-                  <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                   <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-400 shadow-[0_0_8px_#34d399]" />
                 </span>
                 <span>أساتذة متصلون</span>
@@ -615,7 +614,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       {pendingResetCount > 0 && (
         <div className="bg-gradient-to-r from-amber-500/15 via-rose-500/15 to-amber-500/10 border-2 border-rose-300 rounded-3xl p-4 sm:p-5 flex flex-col sm:flex-row sm:items-center justify-between gap-4 shadow-sm animate-fadeIn">
           <div className="flex items-center gap-3">
-            <span className="p-3 rounded-2xl bg-rose-600 text-white shadow-md animate-bounce">
+            <span className="p-3 rounded-2xl bg-rose-600 text-white shadow-md">
               <ShieldAlert className="w-6 h-6" />
             </span>
             <div>
@@ -623,7 +622,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 <h4 className="font-black text-slate-900 text-sm sm:text-base">
                   تنبيه أمان ومصادقة عاجل: يوجد {pendingResetCount} طلب استرجاع كلمة سر بانتظار موافقتك!
                 </h4>
-                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-rose-600 text-white animate-pulse">
+                <span className="px-2 py-0.5 rounded-full text-xs font-black bg-rose-600 text-white">
                   مطلوب الإجراء
                 </span>
               </div>
@@ -710,8 +709,8 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             />
             <span>حسابات الموظفين (42)</span>
             {pendingResetCount > 0 ? (
-              <span className="text-[10px] bg-rose-600 text-white font-black px-2 py-0.5 rounded-full animate-pulse flex items-center gap-1 shadow-xs">
-                <span className="w-1.5 h-1.5 rounded-full bg-white animate-ping" />
+              <span className="text-[10px] bg-rose-600 text-white font-black px-2 py-0.5 rounded-full flex items-center gap-1 shadow-xs">
+                <span className="w-1.5 h-1.5 rounded-full bg-white" />
                 <span>{pendingResetCount} طلب معلق</span>
               </span>
             ) : (
@@ -749,7 +748,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             }`}
           >
             <span className="relative flex h-2.5 w-2.5 shrink-0">
-              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
             </span>
             <span>المتصلون الآن</span>
@@ -1115,7 +1113,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             >
               {isSubmittingAnn ? (
                 <>
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                   <span>جارٍ نشر الإعلان...</span>
                 </>
               ) : (
@@ -1354,7 +1352,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
             >
               {isUploading ? (
                 <>
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                   <span>جارٍ الرفع والنشر...</span>
                 </>
               ) : (
@@ -1456,14 +1454,12 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 <div className="mt-2 inline-flex flex-wrap items-center gap-2 text-[11px] font-bold">
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900">
                     <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                     </span>
                     <span>الأساتذة المتصلون الآن: {onlineTeacherRecords.length}</span>
                   </span>
                   <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-emerald-50 border border-emerald-200 text-emerald-900">
                     <span className="relative flex h-2 w-2">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-500" />
                     </span>
                     <span>التلاميذ المتصلون الآن: {onlineStudentRecords.length}</span>
@@ -1577,7 +1573,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                         <div className="flex items-center gap-2 min-w-0">
                           {staffOnline ? (
                             <span className="relative flex h-2.5 w-2.5 shrink-0" title="متصل الآن">
-                              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                               <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_6px_#10b981]" />
                             </span>
                           ) : (
@@ -1702,7 +1697,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                     <div className="min-w-0 flex items-center gap-2">
                       {studentOnline ? (
                         <span className="relative flex h-2.5 w-2.5 shrink-0" title="متصل الآن">
-                          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500 shadow-[0_0_6px_#10b981]" />
                         </span>
                       ) : (
@@ -1828,7 +1822,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                   <div className="w-12 h-12 rounded-2xl bg-emerald-600 text-white flex items-center justify-center shadow-sm relative">
                     <GraduationCap className="w-6 h-6" />
                     <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white" />
                     </span>
                   </div>
@@ -1836,7 +1829,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                     <div className="flex items-center gap-2">
                       <h3 className="font-black text-slate-900 text-base">التلاميذ المتصلون الآن</h3>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-black">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span>متصل</span>
                       </span>
                     </div>
@@ -1858,7 +1851,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                   <div className="w-12 h-12 rounded-2xl bg-teal-700 text-white flex items-center justify-center shadow-sm relative">
                     <BookOpen className="w-6 h-6" />
                     <span className="absolute -top-1 -right-1 flex h-3.5 w-3.5">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-3.5 w-3.5 bg-emerald-500 border-2 border-white" />
                     </span>
                   </div>
@@ -1866,7 +1858,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                     <div className="flex items-center gap-2">
                       <h3 className="font-black text-slate-900 text-base">الأساتذة المتصلون الآن</h3>
                       <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-100 text-emerald-800 text-[11px] font-black">
-                        <span className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+                        <span className="w-2 h-2 rounded-full bg-emerald-500" />
                         <span>متصل</span>
                       </span>
                     </div>
@@ -1947,7 +1939,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
                     </span>
                     <h4 className="font-black text-slate-900 text-sm sm:text-base">
@@ -1987,7 +1978,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                           <div className="flex items-center gap-3 min-w-0">
                             {online ? (
                               <span className="relative flex h-3 w-3 shrink-0" title="متصل الآن">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
                               </span>
                             ) : (
@@ -2031,7 +2021,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                 <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                   <div className="flex items-center gap-2">
                     <span className="relative flex h-3 w-3 shrink-0">
-                      <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                       <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
                     </span>
                     <h4 className="font-black text-slate-900 text-sm sm:text-base">
@@ -2071,7 +2060,6 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
                           <div className="flex items-center gap-3 min-w-0">
                             {online ? (
                               <span className="relative flex h-3 w-3 shrink-0" title="متصل الآن">
-                                <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
                                 <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500 shadow-[0_0_8px_#10b981]" />
                               </span>
                             ) : (

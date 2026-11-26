@@ -47,7 +47,7 @@ export const AnnouncementCard: React.FC<AnnouncementCardProps> = ({
           border: 'border-red-300 bg-red-50/70',
           badge: 'bg-red-600 text-white',
           label: 'عاجل جداً ومهم',
-          icon: <Flame className="w-4 h-4 text-red-500 animate-pulse" />,
+          icon: <Flame className="w-4 h-4 text-red-500" />,
         };
       case 'important':
         return {

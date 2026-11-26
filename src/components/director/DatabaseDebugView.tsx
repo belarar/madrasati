@@ -313,7 +313,7 @@ export const DatabaseDebugView: React.FC<DatabaseDebugViewProps> = ({
               className="px-3 py-1.5 rounded-xl bg-emerald-600 hover:bg-emerald-700 text-white text-xs font-bold transition-all flex items-center gap-1.5 shadow-xs"
               title="مزامنة فورية الآن"
             >
-              <RefreshCw className={`w-3.5 h-3.5 ${isSyncing ? 'animate-spin' : ''}`} />
+              <RefreshCw className="w-3.5 h-3.5" />
               <span className="hidden sm:inline">مزامنة فورية</span>
             </button>
 
@@ -384,7 +384,7 @@ export const DatabaseDebugView: React.FC<DatabaseDebugViewProps> = ({
               <Server className="w-4 h-4 text-indigo-600" />
             </div>
             <div className="flex items-center gap-1.5">
-              <span className={`w-2.5 h-2.5 rounded-full ${serverState.online ? 'bg-emerald-500 animate-pulse' : 'bg-red-500'}`} />
+              <span className={`w-2.5 h-2.5 rounded-full ${serverState.online ? 'bg-emerald-500' : 'bg-red-500'}`} />
               <span className="text-sm font-bold text-slate-800">
                 {serverState.online ? 'متصل وجاهز (Online)' : 'غير متصل (Offline)'}
               </span>

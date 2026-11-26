@@ -270,6 +270,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
         title: annTitle.trim(),
         content: annContent.trim(),
         target: annTarget,
+        targetClass: annTarget === 'students' ? 'ALL' : annTarget,
         priority: annPriority,
         authorName: `${currentUser.name} (ناظر المتوسطة)`,
         authorRole: 'censor',
@@ -1453,7 +1454,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
             >
               {isSubmittingAnn ? (
                 <>
-                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                   <span>جارٍ نشر الإعلان...</span>
                 </>
               ) : (

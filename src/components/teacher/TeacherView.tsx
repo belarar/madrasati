@@ -198,6 +198,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
         title: teacherAnnTitle.trim(),
         content: teacherAnnContent.trim(),
         target: teacherAnnTarget,
+        targetClass: teacherAnnTarget === 'students' ? 'ALL' : teacherAnnTarget,
         priority: teacherAnnPriority,
         authorName: `${currentUser.name} (أستاذة ${currentUser.title || 'المادة'})`,
         authorRole: 'teacher',
@@ -756,7 +757,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
             >
               {isSubmitting ? (
                 <>
-                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                  <span className="w-5 h-5 border-2 border-white border-t-transparent rounded-full" />
                   <span>جارٍ رفع وإرسال الوثيقة...</span>
                 </>
               ) : (
@@ -1055,7 +1056,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
                   >
                     {isSubmittingAnn ? (
                       <>
-                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                        <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
                         <span>جارٍ النشر...</span>
                       </>
                     ) : (

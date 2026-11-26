@@ -261,7 +261,7 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
         );
       case 'lesson_request':
         return (
-          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200 animate-pulse">
+          <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-bold bg-rose-50 text-rose-800 border border-rose-200">
             <span>🙋‍♂️</span>
             <span>طلب تصوير درس (تغيبت)</span>
           </span>
@@ -957,7 +957,7 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
                 >
                   {formLoading ? (
                     <>
-                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                      <span className="w-3.5 h-3.5 border-2 border-white border-t-transparent rounded-full" />
                       <span>جارٍ النشر في قناة القسم...</span>
                     </>
                   ) : (

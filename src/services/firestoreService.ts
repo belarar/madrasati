@@ -1,13 +1,18 @@
 import {
+  Timestamp,
   collection,
   deleteDoc,
   doc,
+  enableNetwork,
   getDoc,
   getDocFromServer,
   getDocs,
+  getDocsFromServer,
   limit,
   onSnapshot,
+  orderBy,
   query,
+  serverTimestamp,
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
@@ -121,6 +126,97 @@ const staffPinsCol = collection(firestore, 'staff_pins');
 const presenceCol = collection(firestore, 'user_presence');
 const customStudentsCol = collection(firestore, 'custom_students');
 
+export function resolveFirestoreTimestampIso(val: unknown): string {
+  if (!val) return new Date().toISOString();
+  if (typeof val === 'string') return val;
+  if (typeof val === 'number') return new Date(val).toISOString();
+  if (val instanceof Timestamp || typeof (val as any).toDate === 'function') {
+    try {
+      return (val as Timestamp).toDate().toISOString();
+    } catch {
+      return new Date().toISOString();
+    }
+  }
+  if (typeof (val as any).seconds === 'number') {
+    return new Date((val as any).seconds * 1000).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+export function getAnnouncementTimestampMs(val: unknown): number {
+  const iso = resolveFirestoreTimestampIso(val);
+  const ms = new Date(iso).getTime();
+  return Number.isNaN(ms) ? 0 : ms;
+}
+
+export function mapFirestoreAnnouncementDoc(
+  id: string,
+  raw: Record<string, any>
+): SchoolAnnouncement {
+  const createdAt = resolveFirestoreTimestampIso(raw.createdAt ?? raw.createdAtIso);
+  return {
+    ...(raw as SchoolAnnouncement),
+    id,
+    title: typeof raw.title === 'string' ? raw.title : '',
+    content: typeof raw.content === 'string' ? raw.content : '',
+    target: raw.target || 'all',
+    targetClass: raw.targetClass || (raw.target === 'students' ? 'ALL' : raw.target || 'all'),
+    priority: raw.priority || 'normal',
+    authorName: raw.authorName || 'إدارة المؤسسة',
+    authorRole: raw.authorRole || 'director',
+    createdAt,
+  };
+}
+
+export function subscribeToAnnouncementsFromFirestore(
+  onUpdate: (anns: SchoolAnnouncement[]) => void,
+  onError?: (err: unknown) => void
+): () => void {
+  const q = query(annsCol, orderBy('createdAt', 'desc'));
+  return onSnapshot(
+    q,
+    snapshot => {
+      const anns: SchoolAnnouncement[] = [];
+      snapshot.forEach(d => {
+        const raw = d.data({ serverTimestamps: 'estimate' }) as Record<string, any>;
+        anns.push(mapFirestoreAnnouncementDoc(d.id, raw));
+      });
+      anns.sort(
+        (a, b) => getAnnouncementTimestampMs(b.createdAt) - getAnnouncementTimestampMs(a.createdAt)
+      );
+      onUpdate(anns);
+    },
+    err => {
+      detectFirestoreQuotaError(err);
+      console.warn('[Firestore] Announcements onSnapshot error:', err);
+      onError?.(err);
+    }
+  );
+}
+
+export async function refreshAnnouncementsFromFirestoreServer(): Promise<SchoolAnnouncement[]> {
+  if (isFirestoreQuotaExceeded()) return [];
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return [];
+  try {
+    await enableNetwork(firestore).catch(() => {});
+    const q = query(annsCol, orderBy('createdAt', 'desc'));
+    const snapshot = await getDocsFromServer(q);
+    const anns: SchoolAnnouncement[] = [];
+    snapshot.forEach(d => {
+      const raw = d.data({ serverTimestamps: 'estimate' }) as Record<string, any>;
+      anns.push(mapFirestoreAnnouncementDoc(d.id, raw));
+    });
+    anns.sort(
+      (a, b) => getAnnouncementTimestampMs(b.createdAt) - getAnnouncementTimestampMs(a.createdAt)
+    );
+    return anns;
+  } catch (err) {
+    detectFirestoreQuotaError(err);
+    console.warn('[Firestore] Server refresh announcements warning:', err);
+    return [];
+  }
+}
+
 export interface FirestorePasswordResetRequest {
   id: string;
   identifier: string;
@@ -190,23 +286,11 @@ export function initFirestoreRealtimeSync(callbacks: {
     }
   );
 
-  // 2. Announcements real-time listener
-  onSnapshot(
-    annsCol,
-    snapshot => {
-      const anns: SchoolAnnouncement[] = [];
-      snapshot.forEach(d => {
-        anns.push({ ...(d.data() as SchoolAnnouncement), id: d.id });
-      });
-      anns.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
-      callbacks.onCloudConnected?.();
-      callbacks.onAnnouncements(anns);
-    },
-    err => {
-      detectFirestoreQuotaError(err);
-      console.warn('[Firestore] Announcements subscription error:', err);
-    }
-  );
+  // 2. Announcements real-time listener (ordered newest first with persistentLocalCache)
+  subscribeToAnnouncementsFromFirestore(anns => {
+    callbacks.onCloudConnected?.();
+    callbacks.onAnnouncements(anns);
+  });
 
   // 3. Summons real-time listener
   onSnapshot(
@@ -481,8 +565,12 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
     const annRef = doc(firestore, 'announcements', ann.id);
     const downloadUrl = ann.fileName ? `/api/announcements/${encodeURIComponent(ann.id)}/download` : undefined;
     const payload = sanitizeForFirestore(ann, downloadUrl);
-    await setDoc(annRef, payload, { merge: true });
-    console.log(`[Firestore] Announcement ${ann.id} saved to cloud database.`);
+    payload.target = ann.target || 'all';
+    payload.targetClass = ann.targetClass || (ann.target === 'students' ? 'ALL' : ann.target || 'all');
+    payload.createdAtIso = ann.createdAt || new Date().toISOString();
+    payload.createdAt = serverTimestamp();
+
+    const writePromise = setDoc(annRef, payload, { merge: true });
 
     // Only split into file_chunks when payload exceeds direct Firestore doc size threshold
     if (ann.fileDataUrl && typeof ann.fileDataUrl === 'string' && ann.fileDataUrl.length > 800000) {
@@ -492,7 +580,7 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
     // Auto-create deterministic cloud notification for announcement
     const notifId = `notif-ann-${ann.id}`;
     const notifRef = doc(firestore, 'notifications', notifId);
-    await setDoc(
+    const notifPromise = setDoc(
       notifRef,
       {
         id: notifId,
@@ -500,6 +588,7 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
         title: `إعلان رسمي جديد: ${ann.title}`,
         message: (ann.content || '').slice(0, 160) + ((ann.content || '').length > 160 ? '...' : ''),
         targetRole: ann.target || 'all',
+        targetClassId: ann.targetClass && ann.targetClass !== 'ALL' ? ann.targetClass : null,
         sourceAuthorName: ann.authorName || 'إدارة المؤسسة',
         sourceId: ann.id,
         createdAt: ann.createdAt || new Date().toISOString(),
@@ -507,6 +596,18 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
       },
       { merge: true }
     );
+
+    // Offline writes immediately persist to Firestore persistentLocalCache and trigger onSnapshot,
+    // while the server acknowledgment promise resolves once online returns.
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      writePromise.catch(err => detectFirestoreQuotaError(err));
+      notifPromise.catch(() => {});
+      return true;
+    }
+
+    await writePromise;
+    notifPromise.catch(() => {});
+    console.log(`[Firestore] Announcement ${ann.id} saved to cloud database.`);
     return true;
   } catch (err) {
     detectFirestoreQuotaError(err);
@@ -825,10 +926,13 @@ export function initPrivateMessagesSync(
   );
 }
 
+const SEEDED_KEY = 'ben_naama_firestore_seeded_madrasati_v1';
+
 export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], existingAnns: SchoolAnnouncement[]) {
   if (isFirestoreQuotaExceeded()) return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
   try {
-    if (typeof window !== 'undefined' && localStorage.getItem('ben_naama_firestore_seeded') === 'true') {
+    if (typeof window !== 'undefined' && localStorage.getItem(SEEDED_KEY) === 'true') {
       return;
     }
     const snapshot = await getDocs(query(docsCol, limit(1)));
@@ -865,7 +969,7 @@ export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], e
       }
     }
     if (typeof window !== 'undefined') {
-      localStorage.setItem('ben_naama_firestore_seeded', 'true');
+      localStorage.setItem(SEEDED_KEY, 'true');
     }
   } catch (err) {
     detectFirestoreQuotaError(err);

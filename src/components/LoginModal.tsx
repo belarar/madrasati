@@ -373,7 +373,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 >
                   {loading ? (
                     <>
-                      <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full animate-spin" />
+                      <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full" />
                       <span style={{ color: '#fef08a', fontWeight: 900 }}>جارٍ التحقق من رمز التفعيل والدخول...</span>
                     </>
                   ) : (
@@ -560,7 +560,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                     >
                       {isSubmittingReset ? (
                         <>
-                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          <span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full" />
                           <span>جارٍ إرسال الطلب للمدير...</span>
                         </>
                       ) : (
@@ -672,7 +672,7 @@ export const LoginModal: React.FC<LoginModalProps> = ({ isOpen, onClose, onLogin
                 >
                   {loading ? (
                     <>
-                      <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full animate-spin" />
+                      <span className="w-5 h-5 border-2 border-yellow-300 border-t-transparent rounded-full" />
                       <span style={{ color: '#fef08a', fontWeight: 900 }}>جارٍ التحقق من بيانات الدخول...</span>
                     </>
                   ) : (

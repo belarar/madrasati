@@ -37,6 +37,7 @@ import {
   SyncStatus,
   updateCurrentUserPassword,
 } from '../services/storageService';
+import { refreshAnnouncementsFromFirestoreServer } from '../services/firestoreService';
 import { AppNotification, UserProfile, UserRole } from '../types';
 import { NotificationsModal } from './common/NotificationsModal';
 import { PwaInstallModal } from './common/PwaInstallModal';
@@ -72,9 +73,12 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   const [confirmPasswordInput, setConfirmPasswordInput] = useState('');
   const [pwdMsg, setPwdMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
-  // Server Sync Status
+  // Server Sync Status & Offline Badge State
   const [syncState, setSyncState] = useState<{ status: SyncStatus; lastSyncTime: number | null }>(
     () => getSyncStatus()
+  );
+  const [isBrowserOffline, setIsBrowserOffline] = useState<boolean>(
+    () => typeof navigator !== 'undefined' && !navigator.onLine
   );
   const [manualSyncing, setManualSyncing] = useState(false);
 
@@ -87,6 +91,11 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
     };
 
     const handleSyncStatus = (e: any) => {
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        setIsBrowserOffline(true);
+        setSyncState({ status: 'offline', lastSyncTime: getSyncStatus().lastSyncTime });
+        return;
+      }
       if (e?.detail) {
         setSyncState(e.detail);
       } else {
@@ -95,14 +104,19 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
     };
 
     updateNotifs();
+    setIsBrowserOffline(typeof navigator !== 'undefined' && !navigator.onLine);
     setSyncState(getSyncStatus());
     window.addEventListener('notifications-change', updateNotifs);
     window.addEventListener('sync-status-change', handleSyncStatus);
 
     const handleOnline = () => {
+      setIsBrowserOffline(false);
       setSyncState(getSyncStatus());
+      refreshAnnouncementsFromFirestoreServer().catch(() => {});
+      syncWithServer(true).catch(() => {});
     };
     const handleOffline = () => {
+      setIsBrowserOffline(true);
       setSyncState({ status: 'offline', lastSyncTime: getSyncStatus().lastSyncTime });
     };
     window.addEventListener('online', handleOnline);
@@ -125,9 +139,14 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
   }, [currentUser]);
 
   const handleManualSync = async () => {
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      setIsBrowserOffline(true);
+      setSyncState({ status: 'offline', lastSyncTime: getSyncStatus().lastSyncTime });
+      return;
+    }
     setManualSyncing(true);
     try {
-      await syncWithServer(true);
+      await Promise.allSettled([refreshAnnouncementsFromFirestoreServer(), syncWithServer(true)]);
     } catch {}
     setTimeout(() => {
       setManualSyncing(false);
@@ -276,44 +295,43 @@ export const Navbar: React.FC<NavbarProps> = ({ currentUser, onOpenLogin, onSele
               onClick={handleManualSync}
               type="button"
               className={`flex items-center gap-1.5 px-2.5 py-1.5 sm:px-3 sm:py-2 rounded-xl text-xs font-bold transition-all shadow-2xs border cursor-pointer active:scale-95 ${
-                manualSyncing || syncState.status === 'syncing'
+                isBrowserOffline || syncState.status === 'offline'
+                  ? 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300'
+                  : manualSyncing || syncState.status === 'syncing'
                   ? 'bg-sky-50 text-sky-800 border-sky-300'
-                  : syncState.status === 'connected'
-                  ? 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 border-emerald-300'
-                  : 'bg-rose-50 hover:bg-rose-100 text-rose-800 border-rose-300'
+                  : 'bg-emerald-50 hover:bg-emerald-100/90 text-emerald-900 border-emerald-300'
               }`}
               title={
-                syncState.status === 'connected'
-                  ? 'حالة المزامنة: متصل بالخادم المركزي (انقر للتحديث الفوري)'
+                isBrowserOffline || syncState.status === 'offline'
+                  ? 'غير متصل بالإنترنت (يتم عرض البيانات المحفوظة محلياً)'
                   : syncState.status === 'syncing' || manualSyncing
                   ? 'جارٍ مزامنة البيانات مع الخادم...'
-                  : 'حالة المزامنة: غير متصل بالخادم (انقر لإعادة المحاولة)'
+                  : 'حالة المزامنة: متصل بالخادم المركزي (انقر للتحديث الفوري)'
               }
             >
-              {manualSyncing || syncState.status === 'syncing' ? (
-                <>
-                  <RefreshCw className="w-3.5 h-3.5 text-sky-600 animate-spin shrink-0" />
-                  <span className="hidden sm:inline text-[11px] font-bold text-sky-900">
-                    مزامنة...
-                  </span>
-                </>
-              ) : syncState.status === 'connected' ? (
-                <>
-                  <span className="relative flex h-2 w-2 shrink-0">
-                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
-                  </span>
-                  <Wifi className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
-                  <span className="text-[11px] font-black text-emerald-900">
-                    متصل
-                  </span>
-                </>
-              ) : (
+              {isBrowserOffline || syncState.status === 'offline' ? (
                 <>
                   <span className="h-2 w-2 rounded-full bg-rose-600 shrink-0" />
                   <WifiOff className="w-3.5 h-3.5 text-rose-600 shrink-0" />
                   <span className="text-[11px] font-black text-rose-800">
                     غير متصل
+                  </span>
+                </>
+              ) : manualSyncing || syncState.status === 'syncing' ? (
+                <>
+                  <RefreshCw className="w-3.5 h-3.5 text-sky-600 shrink-0" />
+                  <span className="hidden sm:inline text-[11px] font-bold text-sky-900">
+                    مزامنة...
+                  </span>
+                </>
+              ) : (
+                <>
+                  <span className="relative flex h-2 w-2 shrink-0">
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-emerald-600" />
+                  </span>
+                  <Wifi className="w-3.5 h-3.5 text-emerald-700 shrink-0" />
+                  <span className="text-[11px] font-black text-emerald-900">
+                    متصل
                   </span>
                 </>
               )}

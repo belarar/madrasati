@@ -52,6 +52,7 @@ import {
   isFirestoreQuotaExceeded,
   fetchPasswordResetRequestsFromFirestore,
   markPresenceOfflineInFirestore,
+  refreshAnnouncementsFromFirestoreServer,
   rejectPasswordResetRequestInFirestore,
   resolvePendingResetRequestsForIdentifierInFirestore,
   saveAnnouncementToFirestore,
@@ -126,23 +127,6 @@ function broadcastLocalEvent(type: 'announcements-change' | 'notifications-chang
   try {
     getSyncBroadcastChannel()?.postMessage({ type, timestamp: Date.now() });
   } catch {}
-}
-
-function getAnnouncementsSignature(list: SchoolAnnouncement[]): string {
-  return JSON.stringify(
-    list.map(a => ({
-      id: a.id,
-      title: a.title,
-      content: a.content,
-      target: a.target,
-      priority: a.priority,
-      badge: a.badge || '',
-      createdAt: a.createdAt || '',
-      authorName: a.authorName || '',
-      fileName: a.fileName || '',
-      hasFile: Boolean(a.fileDataUrl),
-    }))
-  );
 }
 
 // Startup & spam protection for notifications
@@ -341,10 +325,13 @@ function mergeNotificationsLists(
 export function initStorage(): void {
   if (typeof window === 'undefined') return;
 
+  // Legacy localStorage announcement keys are no longer used; Firestore persistentLocalCache stores announcements
+  localStorage.removeItem(STORAGE_KEYS.ANNOUNCEMENTS);
+  localStorage.removeItem(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
+
   // Clean old test artifacts once to guarantee a fresh, real environment
   if (localStorage.getItem(CLEAN_VERSION_KEY) !== 'true') {
     localStorage.removeItem(STORAGE_KEYS.DOCUMENTS);
-    localStorage.removeItem(STORAGE_KEYS.ANNOUNCEMENTS);
     localStorage.removeItem(STORAGE_KEYS.SUMMONS);
     localStorage.removeItem(STORAGE_KEYS.USERS);
     localStorage.removeItem(STORAGE_KEYS.CURRENT_USER);
@@ -355,7 +342,7 @@ export function initStorage(): void {
 
   // Populate cache on startup
   cachedDocuments = getDocuments();
-  cachedAnnouncements = getAnnouncements();
+  cachedAnnouncements = cachedAnnouncements ?? [];
   cachedSummons = getSummons();
   cachedPeerExchanges = getPeerExchanges();
 
@@ -367,8 +354,7 @@ export function initStorage(): void {
         cachedDocuments = null;
         window.dispatchEvent(new Event('documents-change'));
       }
-      if (e.key === STORAGE_KEYS.ANNOUNCEMENTS || e.key === STORAGE_KEYS.DELETED_ANNOUNCEMENTS) {
-        cachedAnnouncements = null;
+      if (e.key === STORAGE_KEYS.DELETED_ANNOUNCEMENTS) {
         window.dispatchEvent(new Event('announcements-change'));
       }
       if (e.key === STORAGE_KEYS.NOTIFICATIONS) {
@@ -444,7 +430,6 @@ export function initStorage(): void {
       onAnnouncements: (liveAnns) => {
         if (Array.isArray(liveAnns)) {
           const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
-          const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
           const prev = cachedAnnouncements || [];
 
           confirmedFirestoreAnnIds.clear();
@@ -456,38 +441,19 @@ export function initStorage(): void {
             }
           }
 
-          const mergedMap = new Map<string, SchoolAnnouncement>();
-
-          // 1. Keep locally pending announcements and confirmed server announcements so Firestore quota/cache never erases them
-          for (const a of prev) {
-            if (!a || !a.id || deletedSet.has(a.id)) continue;
-            if (pendingSet.has(a.id) || confirmedServerAnnIds.has(a.id)) {
-              mergedMap.set(a.id, a);
-            }
-          }
-          for (const [id, sAnn] of serverAnnCacheMap.entries()) {
-            if (!deletedSet.has(id) && !mergedMap.has(id)) {
-              mergedMap.set(id, sAnn);
-            }
-          }
-
-          // 2. Merge live Firestore announcements (preserving local attachment dataUrl if present)
-          for (const ann of liveAnns) {
-            if (!ann || !ann.id || deletedSet.has(ann.id)) continue;
-            const local = prev.find(p => p.id === ann.id) || mergedMap.get(ann.id);
-            const resolvedAnn =
-              local?.fileDataUrl && !ann.fileDataUrl
+          const merged = liveAnns
+            .filter(ann => ann && ann.id && !deletedSet.has(ann.id))
+            .map(ann => {
+              const local = prev.find(p => p.id === ann.id);
+              return local?.fileDataUrl && !ann.fileDataUrl
                 ? { ...ann, fileDataUrl: local.fileDataUrl }
                 : ann;
-            mergedMap.set(ann.id, resolvedAnn);
-          }
-
-          const merged = Array.from(mergedMap.values()).sort(
-            (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-          );
+            })
+            .sort(
+              (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
+            );
 
           cachedAnnouncements = merged;
-          safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(merged));
           window.dispatchEvent(new Event('announcements-change'));
 
           // Asynchronously hydrate missing attachments
@@ -621,7 +587,7 @@ export function initStorage(): void {
 
     // Seed baseline data to cloud database only when director logs in and hasn't seeded yet
     if (getCurrentUser()?.role === 'director') {
-      seedInitialFirestoreData(getDocuments(), getAnnouncements()).catch(() => {});
+      seedInitialFirestoreData(getDocuments(), INITIAL_ANNOUNCEMENTS).catch(() => {});
     }
   } catch (err) {
     console.debug('[Firestore] Sync init note:', err);
@@ -645,6 +611,16 @@ export function initStorage(): void {
       syncWithServer(true).catch(() => {});
     });
     window.addEventListener('online', () => {
+      refreshAnnouncementsFromFirestoreServer()
+        .then(serverAnns => {
+          if (serverAnns.length > 0) {
+            const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
+            const filtered = serverAnns.filter(a => a && a.id && !deletedSet.has(a.id));
+            cachedAnnouncements = filtered;
+            window.dispatchEvent(new Event('announcements-change'));
+          }
+        })
+        .catch(() => {});
       syncWithServer(true).catch(() => {});
     });
     window.addEventListener('offline', () => {
@@ -1385,9 +1361,12 @@ export async function authenticateUserAsync(
 // Safe localStorage setter with QuotaExceeded fallback protection
 export function safeSetItem(key: string, value: string): boolean {
   if (typeof window === 'undefined') return false;
+  if (key === STORAGE_KEYS.ANNOUNCEMENTS || key === STORAGE_KEYS.PENDING_ANNOUNCEMENTS) {
+    return true;
+  }
   try {
     let toStore = value;
-    if (key === STORAGE_KEYS.DOCUMENTS || key === STORAGE_KEYS.ANNOUNCEMENTS) {
+    if (key === STORAGE_KEYS.DOCUMENTS) {
       try {
         const parsed = JSON.parse(value);
         if (Array.isArray(parsed)) {
@@ -1750,35 +1729,15 @@ export async function downloadAnnouncementAttachment(ann: SchoolAnnouncement): P
   triggerBrowserDownload(serverDownloadUrl, targetFilename);
 }
 
-// Announcements
+// Announcements (Stored strictly in Firebase Firestore with persistentLocalCache — NOT localStorage)
 export function getAnnouncements(): SchoolAnnouncement[] {
   const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
   if (cachedAnnouncements !== null) {
-    return cachedAnnouncements.filter(a => a && a.id && !deletedSet.has(a.id));
+    return [...cachedAnnouncements]
+      .filter(a => a && a.id && !deletedSet.has(a.id))
+      .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
   }
-  try {
-    if (typeof window !== 'undefined') {
-      const raw = localStorage.getItem(STORAGE_KEYS.ANNOUNCEMENTS);
-      if (raw !== null) {
-        const parsed = JSON.parse(raw);
-        if (Array.isArray(parsed)) {
-          const sorted = [...parsed]
-            .filter(a => a && a.id && !deletedSet.has(a.id))
-            .sort(
-              (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-            );
-          cachedAnnouncements = sorted;
-          return [...sorted];
-        }
-      }
-    }
-  } catch (err) {
-    console.debug('Error reading local announcements:', err);
-  }
-  const fallback = INITIAL_ANNOUNCEMENTS
-    .filter(a => a && a.id && !deletedSet.has(a.id))
-    .sort((a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime());
-  return [...fallback];
+  return [];
 }
 
 function prepareAnnouncementLocally(
@@ -1789,14 +1748,11 @@ function prepareAnnouncementLocally(
   const createdAt = new Date().toISOString();
   const newAnn: SchoolAnnouncement = {
     ...ann,
+    targetClass: ann.targetClass || (ann.target === 'students' ? 'ALL' : ann.target || 'all'),
     id,
     createdAt,
     views: 1,
   };
-
-  const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-  pendingSet.add(newAnn.id);
-  saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
 
   const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
   if (deletedSet.delete(newAnn.id)) {
@@ -1805,9 +1761,7 @@ function prepareAnnouncementLocally(
 
   const updated = [newAnn, ...anns.filter(a => a.id !== newAnn.id)];
   cachedAnnouncements = updated;
-  safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
   window.dispatchEvent(new Event('announcements-change'));
-  broadcastLocalEvent('announcements-change');
 
   // Save attachment to persistent IndexedDB
   if (newAnn.fileDataUrl) {
@@ -1820,13 +1774,14 @@ function prepareAnnouncementLocally(
     ).catch(() => {});
   }
 
-  // Deterministic notification ID so local, server, and Firestore never duplicate
+  // Deterministic notification ID so local and Firestore never duplicate
   const annNotif: AppNotification = {
     id: `notif-ann-${newAnn.id}`,
     type: 'announcement',
     title: `إعلان رسمي جديد: ${newAnn.title}`,
     message: (newAnn.content || '').slice(0, 140) + ((newAnn.content || '').length > 140 ? '...' : ''),
     targetRole: newAnn.target || 'all',
+    targetClassId: newAnn.targetClass && newAnn.targetClass !== 'ALL' ? newAnn.targetClass : undefined,
     sourceAuthorName: newAnn.authorName || 'إدارة المؤسسة',
     sourceId: newAnn.id,
     createdAt,
@@ -1843,39 +1798,45 @@ export async function saveAnnouncementAsync(
   ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>
 ): Promise<{ announcement: SchoolAnnouncement; serverSaved: boolean; cloudSaved: boolean }> {
   const { newAnn } = prepareAnnouncementLocally(ann);
+  const isOffline = typeof navigator !== 'undefined' && !navigator.onLine;
 
   const cloudPromise = Promise.race<boolean>([
     saveAnnouncementToFirestore(newAnn)
       .then(ok => {
         if (ok) {
-          markFirestoreConnected();
+          if (!isOffline) markFirestoreConnected();
           confirmedFirestoreAnnIds.add(newAnn.id);
           firestoreAnnCacheMap.set(newAnn.id, newAnn);
         }
         return ok;
       })
       .catch(() => false),
-    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 8000)),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(isOffline), isOffline ? 300 : 8000)),
   ]);
 
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const fetchTimer = controller ? setTimeout(() => controller.abort(), 8000) : null;
+  let serverPromise: Promise<Response | null>;
+  if (isOffline) {
+    serverPromise = Promise.resolve(null);
+  } else {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const fetchTimer = controller ? setTimeout(() => controller.abort(), 8000) : null;
 
-  const serverPromise = fetch('/api/announcements', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-    credentials: 'same-origin',
-    body: JSON.stringify(newAnn),
-    ...(controller ? { signal: controller.signal } : {}),
-  }).finally(() => {
-    if (fetchTimer) clearTimeout(fetchTimer);
-  });
+    serverPromise = fetch('/api/announcements', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      cache: 'no-store',
+      credentials: 'same-origin',
+      body: JSON.stringify(newAnn),
+      ...(controller ? { signal: controller.signal } : {}),
+    }).finally(() => {
+      if (fetchTimer) clearTimeout(fetchTimer);
+    });
+  }
 
   const [cloudResult, serverResult] = await Promise.allSettled([cloudPromise, serverPromise]);
 
   let serverSaved = false;
-  if (serverResult.status === 'fulfilled' && serverResult.value.ok) {
+  if (serverResult.status === 'fulfilled' && serverResult.value && serverResult.value.ok) {
     const ct = serverResult.value.headers.get('content-type') || '';
     if (ct.includes('application/json')) {
       serverSaved = true;
@@ -1887,12 +1848,6 @@ export async function saveAnnouncementAsync(
     confirmedServerAnnIds.add(newAnn.id);
     serverAnnCacheMap.set(newAnn.id, newAnn);
     lastServerSyncVersion = null;
-    const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-    if (pendingSet.delete(newAnn.id)) {
-      saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
-    }
-    broadcastLocalEvent('sync-now');
-    syncWithServer(true).catch(() => {});
   }
   if (cloudSaved) {
     confirmedFirestoreAnnIds.add(newAnn.id);
@@ -1905,7 +1860,7 @@ export async function saveAnnouncementAsync(
 export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt' | 'views'>): SchoolAnnouncement {
   const { newAnn } = prepareAnnouncementLocally(ann);
 
-  // 1. Direct Cloud Database Save (Firebase Firestore)
+  // 1. Direct Cloud Database Save (Firebase Firestore with persistentLocalCache)
   saveAnnouncementToFirestore(newAnn)
     .then(ok => {
       if (ok) {
@@ -1917,29 +1872,6 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
       console.warn('[Firestore] Cloud save announcement error:', err);
     });
 
-  // 2. Local server sync
-  fetch('/api/announcements', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    cache: 'no-store',
-    credentials: 'same-origin',
-    body: JSON.stringify(newAnn),
-  })
-    .then(res => {
-      const ct = res.headers.get('content-type') || '';
-      if (res.ok && ct.includes('application/json')) {
-        confirmedServerAnnIds.add(newAnn.id);
-        serverAnnCacheMap.set(newAnn.id, newAnn);
-        lastServerSyncVersion = null;
-        const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-        if (pendingSet.delete(newAnn.id)) {
-          saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
-        }
-        broadcastLocalEvent('sync-now');
-      }
-    })
-    .catch(() => {});
-
   return newAnn;
 }
 
@@ -1947,7 +1879,6 @@ export function deleteAnnouncement(annId: string): void {
   const anns = getAnnouncements();
   const updated = anns.filter(a => a.id !== annId);
   cachedAnnouncements = updated;
-  safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(updated));
 
   confirmedServerAnnIds.delete(annId);
   confirmedFirestoreAnnIds.delete(annId);
@@ -1958,20 +1889,14 @@ export function deleteAnnouncement(annId: string): void {
   deletedSet.add(annId);
   saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
 
-  const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-  if (pendingSet.delete(annId)) {
-    saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
-  }
-
   window.dispatchEvent(new Event('announcements-change'));
-  broadcastLocalEvent('announcements-change');
 
-  // 1. Direct Cloud Database Delete
+  // Direct Cloud Database Delete
   deleteAnnouncementFromFirestore(annId).catch(err => {
     console.warn('[Firestore] Cloud delete announcement error:', err);
   });
 
-  // 2. Local server delete
+  // Clean up local server mirror if reachable
   fetch('/api/announcements/' + encodeURIComponent(annId), {
     method: 'DELETE',
     cache: 'no-store',
@@ -3025,8 +2950,7 @@ async function runSingleSyncPass(): Promise<void> {
     cachedDocuments !== null &&
     cachedAnnouncements !== null &&
     cachedSummons !== null &&
-    cachedPeerExchanges !== null &&
-    getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS).size === 0;
+    cachedPeerExchanges !== null;
 
   const syncEndpoint = canUseVersionedCheck
     ? `/api/sync?knownVersion=${encodeURIComponent(String(lastServerSyncVersion))}`
@@ -3105,137 +3029,15 @@ async function runSingleSyncPass(): Promise<void> {
         }
       }
 
-      // 2. Announcements (merge cleanly without resurrecting deleted announcements)
-      if (Array.isArray(data.announcements)) {
+      // 2. Announcements are managed strictly via Firebase Firestore (persistentLocalCache + onSnapshot)
+      if (Array.isArray(data.deletedAnnouncementIds) && data.deletedAnnouncementIds.length > 0) {
         const deletedSet = getIdSetFromStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS);
-        if (Array.isArray(data.deletedAnnouncementIds)) {
-          data.deletedAnnouncementIds.forEach((id: string) => {
-            deletedSet.add(id);
-            confirmedServerAnnIds.delete(id);
-            serverAnnCacheMap.delete(id);
-          });
-          saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
-        }
-
-        const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-        const currentAnns = getAnnouncements();
-        const serverAnnIds = new Set<string>();
-
-        confirmedServerAnnIds.clear();
-        serverAnnCacheMap.clear();
-        for (const sAnn of data.announcements as SchoolAnnouncement[]) {
-          if (sAnn && sAnn.id && !deletedSet.has(sAnn.id)) {
-            serverAnnIds.add(sAnn.id);
-            confirmedServerAnnIds.add(sAnn.id);
-            serverAnnCacheMap.set(sAnn.id, sAnn);
-          }
-        }
-
-        // Clear pending flags for announcements confirmed on server
-        let pendingChanged = false;
-        for (const pId of Array.from(pendingSet)) {
-          if (serverAnnIds.has(pId)) {
-            pendingSet.delete(pId);
-            pendingChanged = true;
-          }
-        }
-        if (pendingChanged) {
-          saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
-        }
-
-        // Re-push locally created pending announcements OR Firestore-only announcements not yet on server and not deleted
-        const unsyncedAnns = currentAnns.filter(
-          a =>
-            a &&
-            a.id &&
-            !serverAnnIds.has(a.id) &&
-            !deletedSet.has(a.id) &&
-            (pendingSet.has(a.id) || confirmedFirestoreAnnIds.has(a.id))
-        );
-        for (const [fId, fAnn] of firestoreAnnCacheMap.entries()) {
-          if (!serverAnnIds.has(fId) && !deletedSet.has(fId) && !unsyncedAnns.some(u => u.id === fId)) {
-            unsyncedAnns.push(fAnn);
-          }
-        }
-
-        if (unsyncedAnns.length > 0) {
-          let pushedAnyAnn = false;
-          await Promise.allSettled(
-            unsyncedAnns.map(un =>
-              fetchWithTimeout(
-                '/api/announcements',
-                {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify(un),
-                },
-                5000
-              ).then(res => {
-                const ct = res.headers.get('content-type') || '';
-                if (res.ok && ct.includes('application/json')) {
-                  pushedAnyAnn = true;
-                  confirmedServerAnnIds.add(un.id);
-                  serverAnnCacheMap.set(un.id, un);
-                  const pSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
-                  if (pSet.delete(un.id)) {
-                    saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pSet);
-                  }
-                }
-              })
-            )
-          );
-          if (pushedAnyAnn) {
-            lastServerSyncVersion = null;
-          }
-        }
-
-        const mergedMap = new Map<string, SchoolAnnouncement>();
-        for (const un of unsyncedAnns) {
-          if (!deletedSet.has(un.id)) {
-            mergedMap.set(un.id, un);
-          }
-        }
-        for (const sAnn of data.announcements as SchoolAnnouncement[]) {
-          if (!sAnn || !sAnn.id || deletedSet.has(sAnn.id)) continue;
-          const localMatch = currentAnns.find(l => l.id === sAnn.id);
-          if (localMatch?.fileDataUrl && !sAnn.fileDataUrl) {
-            mergedMap.set(sAnn.id, { ...sAnn, fileDataUrl: localMatch.fileDataUrl });
-          } else {
-            mergedMap.set(sAnn.id, sAnn);
-          }
-        }
-
-        const mergedAnns = Array.from(mergedMap.values()).sort(
-          (a, b) => new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime()
-        );
-
-        const prevAnnsStr = getAnnouncementsSignature(currentAnns);
-        const newAnnsStr = getAnnouncementsSignature(mergedAnns);
-        const annsDataChanged = prevAnnsStr !== newAnnsStr;
-        if (annsDataChanged || cachedAnnouncements === null) {
-          cachedAnnouncements = mergedAnns;
-          safeSetItem(STORAGE_KEYS.ANNOUNCEMENTS, JSON.stringify(mergedAnns));
-          window.dispatchEvent(new Event('announcements-change'));
-          if (annsDataChanged) {
-            broadcastLocalEvent('announcements-change');
-          }
-
-          // Hydrate any missing attachment payloads from IndexedDB
-          mergedAnns.forEach(a => {
-            if (!a.fileDataUrl && a.fileName) {
-              getFileFromIndexedDb(a.id)
-                .then(stored => {
-                  if (stored?.dataUrl && cachedAnnouncements) {
-                    cachedAnnouncements = cachedAnnouncements.map(item =>
-                      item.id === a.id ? { ...item, fileDataUrl: stored.dataUrl } : item
-                    );
-                    window.dispatchEvent(new Event('announcements-change'));
-                  }
-                })
-                .catch(() => {});
-            }
-          });
-        }
+        data.deletedAnnouncementIds.forEach((id: string) => {
+          deletedSet.add(id);
+          confirmedServerAnnIds.delete(id);
+          serverAnnCacheMap.delete(id);
+        });
+        saveIdSetToStorage(STORAGE_KEYS.DELETED_ANNOUNCEMENTS, deletedSet);
       }
 
       // 3. Summons
