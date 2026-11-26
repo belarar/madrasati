@@ -5,7 +5,9 @@ import {
   getDoc,
   getDocFromServer,
   getDocs,
+  limit,
   onSnapshot,
+  query,
   setDoc,
   updateDoc,
 } from 'firebase/firestore';
@@ -31,10 +33,29 @@ export enum OperationType {
   WRITE = 'write',
 }
 
-let firestoreQuotaExceededUntil = 0;
+const QUOTA_STORAGE_KEY = 'ben_naama_firestore_quota_until';
+
+function readPersistedQuotaUntil(): number {
+  if (typeof window === 'undefined') return 0;
+  try {
+    const raw = localStorage.getItem(QUOTA_STORAGE_KEY);
+    const val = raw ? Number(raw) : 0;
+    return Number.isFinite(val) ? val : 0;
+  } catch {
+    return 0;
+  }
+}
+
+let firestoreQuotaExceededUntil = readPersistedQuotaUntil();
 
 export function isFirestoreQuotaExceeded(): boolean {
-  return Date.now() < firestoreQuotaExceededUntil;
+  if (Date.now() < firestoreQuotaExceededUntil) return true;
+  const persisted = readPersistedQuotaUntil();
+  if (Date.now() < persisted) {
+    firestoreQuotaExceededUntil = persisted;
+    return true;
+  }
+  return false;
 }
 
 export function detectFirestoreQuotaError(error: unknown): boolean {
@@ -48,6 +69,11 @@ export function detectFirestoreQuotaError(error: unknown): boolean {
   ) {
     const already = isFirestoreQuotaExceeded();
     firestoreQuotaExceededUntil = Date.now() + 10 * 60 * 1000;
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem(QUOTA_STORAGE_KEY, String(firestoreQuotaExceededUntil));
+      } catch {}
+    }
     if (!already && typeof window !== 'undefined') {
       window.dispatchEvent(new CustomEvent('firestore-quota-exceeded'));
     }
@@ -124,11 +150,16 @@ export function initFirestoreRealtimeSync(callbacks: {
   onPasswordResetRequests?: (requests: FirestorePasswordResetRequest[]) => void;
   onStaffPins?: (pins: Record<string, FirestoreStaffPinRecord>) => void;
   onCustomStudents?: (students: UserProfile[]) => void;
+  onCloudConnected?: () => void;
 }) {
-  if (isInitialized) return;
+  if (isInitialized || isFirestoreQuotaExceeded()) return;
   isInitialized = true;
 
-  testConnection().catch(() => {});
+  testConnection()
+    .then(ok => {
+      if (ok) callbacks.onCloudConnected?.();
+    })
+    .catch(() => {});
   console.log('[Firestore] Initializing real-time cloud database sync...');
 
   // 1. Documents real-time listener
@@ -150,6 +181,7 @@ export function initFirestoreRealtimeSync(callbacks: {
       // Sort newest first
       docs.sort((a, b) => new Date(b.uploadDate).getTime() - new Date(a.uploadDate).getTime());
       console.log(`[Firestore] Live documents synced: ${docs.length}`);
+      callbacks.onCloudConnected?.();
       callbacks.onDocuments(docs);
     },
     err => {
@@ -167,6 +199,7 @@ export function initFirestoreRealtimeSync(callbacks: {
         anns.push({ ...(d.data() as SchoolAnnouncement), id: d.id });
       });
       anns.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+      callbacks.onCloudConnected?.();
       callbacks.onAnnouncements(anns);
     },
     err => {
@@ -389,8 +422,8 @@ export async function saveDocumentToFirestore(docData: SchoolDocument): Promise<
     await setDoc(docRef, payload, { merge: true });
     console.log(`[Firestore] Document ${docData.id} saved to cloud database.`);
 
-    // If document has a file, also save in file_chunks so full binary is always guaranteed across devices
-    if (docData.fileDataUrl && typeof docData.fileDataUrl === 'string' && docData.fileDataUrl.length > 0) {
+    // Only split into file_chunks when payload exceeds direct Firestore doc size threshold
+    if (docData.fileDataUrl && typeof docData.fileDataUrl === 'string' && docData.fileDataUrl.length > 800000) {
       saveFilePayloadToFirestore(docData.id, docData.fileDataUrl).catch(() => {});
     }
 
@@ -451,8 +484,8 @@ export async function saveAnnouncementToFirestore(ann: SchoolAnnouncement): Prom
     await setDoc(annRef, payload, { merge: true });
     console.log(`[Firestore] Announcement ${ann.id} saved to cloud database.`);
 
-    // If announcement has an attachment, also save in file_chunks
-    if (ann.fileDataUrl && typeof ann.fileDataUrl === 'string' && ann.fileDataUrl.length > 0) {
+    // Only split into file_chunks when payload exceeds direct Firestore doc size threshold
+    if (ann.fileDataUrl && typeof ann.fileDataUrl === 'string' && ann.fileDataUrl.length > 800000) {
       saveFilePayloadToFirestore(ann.id, ann.fileDataUrl).catch(() => {});
     }
 
@@ -798,14 +831,15 @@ export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], e
     if (typeof window !== 'undefined' && localStorage.getItem('ben_naama_firestore_seeded') === 'true') {
       return;
     }
-    const snapshot = await getDocs(docsCol);
+    const snapshot = await getDocs(query(docsCol, limit(1)));
     if (snapshot.empty) {
       let docsToSeed = existingDocs;
       // If client has no docs in memory, try fetching from server /api/sync
       if (!docsToSeed || docsToSeed.length === 0) {
         try {
-          const res = await fetch('/api/sync', { cache: 'no-store' });
-          if (res.ok) {
+          const res = await fetch('/api/sync', { cache: 'no-store', credentials: 'same-origin' });
+          const contentType = res.headers.get('content-type') || '';
+          if (res.ok && contentType.includes('application/json')) {
             const data = await res.json();
             if (Array.isArray(data.documents) && data.documents.length > 0) {
               docsToSeed = data.documents;
@@ -824,7 +858,7 @@ export async function seedInitialFirestoreData(existingDocs: SchoolDocument[], e
       }
     }
 
-    const annSnap = await getDocs(annsCol);
+    const annSnap = await getDocs(query(annsCol, limit(1)));
     if (annSnap.empty && existingAnns.length > 0) {
       for (const a of existingAnns) {
         await saveAnnouncementToFirestore(a);

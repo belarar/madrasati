@@ -250,7 +250,10 @@ export const StudentView: React.FC<StudentViewProps> = ({
   // Announcements targeted to students or all (sorted newest-first)
   const studentAnnouncements = useMemo(() => {
     return announcements
-      .filter(a => a.target === 'students' || a.target === 'all')
+      .filter(a => {
+        const target = String(a.target || 'all').trim().toLowerCase();
+        return target === 'students' || target === 'all' || target === 'all_students';
+      })
       .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
   }, [announcements]);
 

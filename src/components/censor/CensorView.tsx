@@ -282,7 +282,7 @@ export const CensorView: React.FC<CensorViewProps> = ({
 
       onRefreshData();
       setAnnSuccess(
-        result.serverSaved
+        result.serverSaved || result.cloudSaved
           ? 'تم نشر الإعلان وإرساله وحفظه في قاعدة البيانات بنجاح!'
           : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
       );

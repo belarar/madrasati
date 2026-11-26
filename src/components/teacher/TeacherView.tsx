@@ -210,7 +210,7 @@ export const TeacherView: React.FC<TeacherViewProps> = ({
 
       onRefreshData();
       setTeacherAnnSuccess(
-        result.serverSaved
+        result.serverSaved || result.cloudSaved
           ? 'تم نشر الإعلان لتلاميذك وحفظه في قاعدة البيانات بنجاح!'
           : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
       );

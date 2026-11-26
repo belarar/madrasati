@@ -273,13 +273,40 @@ app.get('/api/sync', (req, res) => {
       : d
   );
 
+  // Strip heavy base64 blobs from announcements (downloaded on demand via /api/announcements/:id/download)
+  const lightAnnouncements = sortedAnnouncements.map((a: any) =>
+    a && typeof a.fileDataUrl === 'string' && a.fileDataUrl.length > 200
+      ? { ...a, fileDataUrl: undefined }
+      : a
+  );
+
+  // Strip heavy base64 blobs from peer exchanges and replies (downloaded on demand via /api/peer-exchanges/:id/download)
+  const lightPeerExchanges = (db.peerExchanges || []).map((p: any) => {
+    if (!p) return p;
+    const nextPost =
+      typeof p.fileDataUrl === 'string' && p.fileDataUrl.length > 200
+        ? { ...p, fileDataUrl: undefined }
+        : p;
+    if (Array.isArray(nextPost.replies) && nextPost.replies.length > 0) {
+      return {
+        ...nextPost,
+        replies: nextPost.replies.map((rep: any) =>
+          rep && typeof rep.fileDataUrl === 'string' && rep.fileDataUrl.length > 200
+            ? { ...rep, fileDataUrl: undefined }
+            : rep
+        ),
+      };
+    }
+    return nextPost;
+  });
+
   return res.json({
     version: dbVersion,
     documents: lightDocuments,
-    announcements: sortedAnnouncements,
+    announcements: lightAnnouncements,
     deletedAnnouncementIds: db.deletedAnnouncementIds || [],
     summons: db.summons,
-    peerExchanges: db.peerExchanges,
+    peerExchanges: lightPeerExchanges,
     privateConversations: db.privateConversations,
     privateMessages: db.privateMessages,
     notifications: db.notifications,
@@ -626,8 +653,17 @@ app.get('/api/announcements', (req, res) => {
 
 app.post('/api/announcements', (req, res) => {
   const ann = req.body || {};
+  const titleText = typeof ann.title === 'string' ? ann.title.trim() : '';
+  const contentTextBody = typeof ann.content === 'string' ? ann.content.trim() : '';
+  if (!titleText && !contentTextBody) {
+    return res.status(400).json({ error: 'عنوان الإعلان ومحتواه مطلوبان' });
+  }
+
   const newAnn = {
     ...ann,
+    title: titleText || 'إعلان مدرسي',
+    content: contentTextBody,
+    target: ann.target || 'all',
     id: ann.id || 'ann-' + Date.now(),
     createdAt: ann.createdAt || new Date().toISOString(),
     views: ann.views || 1,
@@ -867,6 +903,53 @@ app.post('/api/peer-exchanges/:id/reply', (req, res) => {
 
   saveDatabase(db);
   res.status(201).json(post);
+});
+
+app.get('/api/peer-exchanges/:id/download', (req, res) => {
+  const { id } = req.params;
+  const post = (db.peerExchanges || []).find(p => p.id === id);
+  if (!post || !post.fileDataUrl || typeof post.fileDataUrl !== 'string') {
+    return res.status(404).send('المرفق غير موجود');
+  }
+  if (post.fileDataUrl.startsWith('data:')) {
+    const commaIndex = post.fileDataUrl.indexOf(',');
+    if (commaIndex !== -1) {
+      const header = post.fileDataUrl.slice(0, commaIndex);
+      const base64Data = post.fileDataUrl.slice(commaIndex + 1);
+      const mimeMatch = header.match(/^data:([^;]+)/);
+      const filename = post.fileName || `${post.title || 'attachment'}.${post.fileFormat || 'pdf'}`;
+      const mime = mimeMatch ? mimeMatch[1] : getMimeTypeByFormat(post.fileFormat, filename);
+      const buffer = Buffer.from(base64Data, 'base64');
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      return res.send(buffer);
+    }
+  }
+  return res.status(404).send('المرفق غير متاح');
+});
+
+app.get('/api/peer-exchanges/:id/replies/:replyId/download', (req, res) => {
+  const { id, replyId } = req.params;
+  const post = (db.peerExchanges || []).find(p => p.id === id);
+  const reply = post?.replies?.find((r: any) => r.id === replyId);
+  if (!reply || !reply.fileDataUrl || typeof reply.fileDataUrl !== 'string') {
+    return res.status(404).send('المرفق غير موجود');
+  }
+  if (reply.fileDataUrl.startsWith('data:')) {
+    const commaIndex = reply.fileDataUrl.indexOf(',');
+    if (commaIndex !== -1) {
+      const header = reply.fileDataUrl.slice(0, commaIndex);
+      const base64Data = reply.fileDataUrl.slice(commaIndex + 1);
+      const mimeMatch = header.match(/^data:([^;]+)/);
+      const filename = reply.fileName || 'مرفق_الرد';
+      const mime = mimeMatch ? mimeMatch[1] : getMimeTypeByFormat(undefined, filename);
+      const buffer = Buffer.from(base64Data, 'base64');
+      res.setHeader('Content-Type', mime);
+      res.setHeader('Content-Disposition', `attachment; filename="${encodeURIComponent(filename)}"; filename*=UTF-8''${encodeURIComponent(filename)}`);
+      return res.send(buffer);
+    }
+  }
+  return res.status(404).send('المرفق غير متاح');
 });
 
 app.delete('/api/peer-exchanges/:id', (req, res) => {

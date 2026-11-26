@@ -300,7 +300,7 @@ export const DirectorView: React.FC<DirectorViewProps> = ({
       setFilterTarget('ALL');
       onRefreshData();
       setAnnSuccess(
-        result.serverSaved
+        result.serverSaved || result.cloudSaved
           ? 'تم نشر الإعلان وإرساله للتلاميذ والأساتذة بنجاح!'
           : 'تم حفظ الإعلان محلياً وسيرسل تلقائياً عند استقرار الاتصال.'
       );

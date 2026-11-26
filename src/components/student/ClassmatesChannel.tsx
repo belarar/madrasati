@@ -32,6 +32,7 @@ import { SUBJECTS } from '../../data/mockData';
 import {
   addPeerExchangeReply,
   deletePeerExchange,
+  ensurePeerExchangeFileDataUrl,
   getPeerExchanges,
   savePeerExchange,
   thankPeerExchange,
@@ -534,7 +535,7 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
                 </div>
 
                 {/* Attachment Section */}
-                {post.hasAttachment && post.fileDataUrl && (
+                {post.hasAttachment && (post.fileDataUrl || post.fileName) && (
                   <div className="bg-emerald-50/60 border border-emerald-200/80 rounded-xl p-3 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <div className="flex items-center gap-3">
                       <div className="w-10 h-10 rounded-xl bg-white border border-emerald-200 flex items-center justify-center text-emerald-700 shrink-0">
@@ -558,12 +559,17 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
                       {post.fileFormat === 'image' && (
                         <button
                           type="button"
-                          onClick={() =>
-                            setPreviewImage({
-                              url: post.fileDataUrl!,
-                              title: post.title,
-                            })
-                          }
+                          onClick={async () => {
+                            const url =
+                              post.fileDataUrl ||
+                              (await ensurePeerExchangeFileDataUrl(post.id));
+                            if (url) {
+                              setPreviewImage({
+                                url,
+                                title: post.title,
+                              });
+                            }
+                          }}
                           className="flex-1 sm:flex-none py-1.5 px-3 rounded-lg bg-white hover:bg-emerald-100/70 border border-emerald-300 text-emerald-800 text-xs font-bold transition-colors inline-flex items-center justify-center gap-1.5"
                         >
                           <Camera className="w-3.5 h-3.5" />
@@ -572,7 +578,10 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
                       )}
 
                       <a
-                        href={post.fileDataUrl}
+                        href={
+                          post.fileDataUrl ||
+                          `/api/peer-exchanges/${encodeURIComponent(post.id)}/download`
+                        }
                         download={post.fileName || `درس_${post.title}`}
                         className="flex-1 sm:flex-none py-1.5 px-3 rounded-lg bg-emerald-700 hover:bg-emerald-800 text-white text-xs font-bold transition-colors inline-flex items-center justify-center gap-1.5 shadow-xs"
                       >
@@ -638,14 +647,17 @@ export const ClassmatesChannel: React.FC<ClassmatesChannelProps> = ({
                             </div>
                             <p className="text-slate-700 whitespace-pre-line">{rep.content}</p>
 
-                            {rep.fileDataUrl && (
+                            {(rep.fileDataUrl || rep.fileName) && (
                               <div className="mt-1 pt-1 border-t border-slate-100 flex items-center justify-between">
                                 <span className="text-[10px] text-emerald-800 font-bold flex items-center gap-1">
                                   <Paperclip className="w-3 h-3" />
                                   <span>{rep.fileName || 'صورة مرفقة'}</span>
                                 </span>
                                 <a
-                                  href={rep.fileDataUrl}
+                                  href={
+                                    rep.fileDataUrl ||
+                                    `/api/peer-exchanges/${encodeURIComponent(post.id)}/replies/${encodeURIComponent(rep.id)}/download`
+                                  }
                                   download={rep.fileName || 'مرفق_الرد'}
                                   className="text-[10px] text-emerald-700 hover:underline font-bold"
                                 >

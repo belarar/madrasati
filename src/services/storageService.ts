@@ -614,10 +614,15 @@ export function initStorage(): void {
           }
         }
       },
+      onCloudConnected: () => {
+        markFirestoreConnected();
+      },
     });
 
-    // Seed baseline data to cloud database if empty
-    seedInitialFirestoreData(getDocuments(), getAnnouncements()).catch(() => {});
+    // Seed baseline data to cloud database only when director logs in and hasn't seeded yet
+    if (getCurrentUser()?.role === 'director') {
+      seedInitialFirestoreData(getDocuments(), getAnnouncements()).catch(() => {});
+    }
   } catch (err) {
     console.debug('[Firestore] Sync init note:', err);
   }
@@ -1648,6 +1653,30 @@ export async function ensureAnnouncementFileDataUrl(ann: SchoolAnnouncement): Pr
   return null;
 }
 
+export async function ensurePeerExchangeFileDataUrl(
+  postId: string,
+  replyId?: string
+): Promise<string | null> {
+  if (!postId) return null;
+  const endpoint = replyId
+    ? `/api/peer-exchanges/${encodeURIComponent(postId)}/replies/${encodeURIComponent(replyId)}/download`
+    : `/api/peer-exchanges/${encodeURIComponent(postId)}/download`;
+  try {
+    const res = await fetch(endpoint, { cache: 'no-store', credentials: 'same-origin' });
+    if (!res.ok) return null;
+    const blob = await res.blob();
+    if (!blob || blob.size === 0) return null;
+    return await new Promise<string | null>(resolve => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(typeof reader.result === 'string' ? reader.result : null);
+      reader.onerror = () => resolve(null);
+      reader.readAsDataURL(blob);
+    });
+  } catch {
+    return null;
+  }
+}
+
 // Real downloadable file generator & streaming server downloader
 export async function downloadFile(doc: SchoolDocument): Promise<void> {
   incrementDownloadCount(doc.id);
@@ -1815,10 +1844,18 @@ export async function saveAnnouncementAsync(
 ): Promise<{ announcement: SchoolAnnouncement; serverSaved: boolean; cloudSaved: boolean }> {
   const { newAnn } = prepareAnnouncementLocally(ann);
 
-  // Never let Firestore SDK retries (e.g. 429 quota exceeded) hang the publish button
   const cloudPromise = Promise.race<boolean>([
-    saveAnnouncementToFirestore(newAnn).catch(() => false),
-    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 2500)),
+    saveAnnouncementToFirestore(newAnn)
+      .then(ok => {
+        if (ok) {
+          markFirestoreConnected();
+          confirmedFirestoreAnnIds.add(newAnn.id);
+          firestoreAnnCacheMap.set(newAnn.id, newAnn);
+        }
+        return ok;
+      })
+      .catch(() => false),
+    new Promise<boolean>(resolve => setTimeout(() => resolve(false), 8000)),
   ]);
 
   const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
@@ -1828,6 +1865,7 @@ export async function saveAnnouncementAsync(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     cache: 'no-store',
+    credentials: 'same-origin',
     body: JSON.stringify(newAnn),
     ...(controller ? { signal: controller.signal } : {}),
   }).finally(() => {
@@ -1836,18 +1874,25 @@ export async function saveAnnouncementAsync(
 
   const [cloudResult, serverResult] = await Promise.allSettled([cloudPromise, serverPromise]);
 
-  const serverSaved = serverResult.status === 'fulfilled' && serverResult.value.ok;
+  let serverSaved = false;
+  if (serverResult.status === 'fulfilled' && serverResult.value.ok) {
+    const ct = serverResult.value.headers.get('content-type') || '';
+    if (ct.includes('application/json')) {
+      serverSaved = true;
+    }
+  }
   const cloudSaved = cloudResult.status === 'fulfilled' && Boolean(cloudResult.value);
 
   if (serverSaved) {
     confirmedServerAnnIds.add(newAnn.id);
     serverAnnCacheMap.set(newAnn.id, newAnn);
+    lastServerSyncVersion = null;
     const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
     if (pendingSet.delete(newAnn.id)) {
       saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
     }
     broadcastLocalEvent('sync-now');
-    syncWithServer().catch(() => {});
+    syncWithServer(true).catch(() => {});
   }
   if (cloudSaved) {
     confirmedFirestoreAnnIds.add(newAnn.id);
@@ -1877,12 +1922,15 @@ export function saveAnnouncement(ann: Omit<SchoolAnnouncement, 'id' | 'createdAt
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     cache: 'no-store',
+    credentials: 'same-origin',
     body: JSON.stringify(newAnn),
   })
     .then(res => {
-      if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
         confirmedServerAnnIds.add(newAnn.id);
         serverAnnCacheMap.set(newAnn.id, newAnn);
+        lastServerSyncVersion = null;
         const pendingSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
         if (pendingSet.delete(newAnn.id)) {
           saveIdSetToStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS, pendingSet);
@@ -2907,12 +2955,32 @@ export type SyncStatus = 'connected' | 'syncing' | 'offline';
 let currentSyncStatus: SyncStatus =
   typeof navigator !== 'undefined' && !navigator.onLine ? 'offline' : 'connected';
 let lastSuccessfulSyncTime: number | null = null;
+let lastFirestoreSyncTime: number | null = null;
 
 export function getSyncStatus(): { status: SyncStatus; lastSyncTime: number | null } {
+  const latest =
+    lastSuccessfulSyncTime && lastFirestoreSyncTime
+      ? Math.max(lastSuccessfulSyncTime, lastFirestoreSyncTime)
+      : lastSuccessfulSyncTime || lastFirestoreSyncTime;
   return {
     status: currentSyncStatus,
-    lastSyncTime: lastSuccessfulSyncTime,
+    lastSyncTime: latest,
   };
+}
+
+export function isFirestoreLiveConnected(maxAgeMs: number = 90_000): boolean {
+  return (
+    lastFirestoreSyncTime !== null &&
+    Date.now() - lastFirestoreSyncTime <= maxAgeMs &&
+    !isFirestoreQuotaExceeded()
+  );
+}
+
+export function markFirestoreConnected(): void {
+  lastFirestoreSyncTime = Date.now();
+  if (typeof navigator === 'undefined' || navigator.onLine) {
+    updateSyncStatus('connected');
+  }
 }
 
 export function updateSyncStatus(newStatus: SyncStatus): void {
@@ -2920,7 +2988,7 @@ export function updateSyncStatus(newStatus: SyncStatus): void {
   if (typeof window !== 'undefined') {
     window.dispatchEvent(
       new CustomEvent('sync-status-change', {
-        detail: { status: newStatus, lastSyncTime: lastSuccessfulSyncTime },
+        detail: { status: newStatus, lastSyncTime: getSyncStatus().lastSyncTime },
       })
     );
   }
@@ -2937,6 +3005,7 @@ async function fetchWithTimeout(
     return await fetch(url, {
       ...options,
       cache: 'no-store',
+      credentials: 'same-origin',
       ...(controller ? { signal: controller.signal } : {}),
     });
   } finally {
@@ -2964,23 +3033,25 @@ async function runSingleSyncPass(): Promise<void> {
     : '/api/sync';
 
   const syncRes = await fetchWithTimeout(syncEndpoint, {}, 20000);
+  const contentType = syncRes.headers.get('content-type') || '';
+  const isJsonResponse = contentType.includes('application/json');
 
-  if (!syncRes.ok) {
+  if (!syncRes.ok || !isJsonResponse) {
     consecutiveSyncFailures += 1;
-    if (consecutiveSyncFailures >= 2 || !lastSuccessfulSyncTime) {
+    if (isFirestoreLiveConnected()) {
+      updateSyncStatus('connected');
+    } else if (consecutiveSyncFailures >= 2 || !lastSuccessfulSyncTime || !isJsonResponse) {
       updateSyncStatus('offline');
     }
   } else {
+    const data = await syncRes.json();
     consecutiveSyncFailures = 0;
     lastSuccessfulSyncTime = Date.now();
     updateSyncStatus('connected');
-    const contentType = syncRes.headers.get('content-type') || '';
-    if (contentType.includes('application/json')) {
-      const data = await syncRes.json();
 
-      if (typeof data.version === 'number') {
-        lastServerSyncVersion = data.version;
-      }
+    if (typeof data.version === 'number') {
+      lastServerSyncVersion = data.version;
+    }
 
       if (data.serverTime) {
         const srvMs = new Date(data.serverTime).getTime();
@@ -3088,6 +3159,7 @@ async function runSingleSyncPass(): Promise<void> {
         }
 
         if (unsyncedAnns.length > 0) {
+          let pushedAnyAnn = false;
           await Promise.allSettled(
             unsyncedAnns.map(un =>
               fetchWithTimeout(
@@ -3099,7 +3171,9 @@ async function runSingleSyncPass(): Promise<void> {
                 },
                 5000
               ).then(res => {
-                if (res.ok) {
+                const ct = res.headers.get('content-type') || '';
+                if (res.ok && ct.includes('application/json')) {
+                  pushedAnyAnn = true;
                   confirmedServerAnnIds.add(un.id);
                   serverAnnCacheMap.set(un.id, un);
                   const pSet = getIdSetFromStorage(STORAGE_KEYS.PENDING_ANNOUNCEMENTS);
@@ -3110,6 +3184,9 @@ async function runSingleSyncPass(): Promise<void> {
               })
             )
           );
+          if (pushedAnyAnn) {
+            lastServerSyncVersion = null;
+          }
         }
 
         const mergedMap = new Map<string, SchoolAnnouncement>();
@@ -3187,7 +3264,7 @@ async function runSingleSyncPass(): Promise<void> {
         }
       }
 
-      // 4. Peer Exchanges
+      // 4. Peer Exchanges (preserve local attachments when stripped by lightweight /api/sync)
       if (Array.isArray(data.peerExchanges)) {
         const currentPeer = getPeerExchanges();
         const serverPeerIds = new Set(data.peerExchanges.map((p: PeerExchangePost) => p.id));
@@ -3203,7 +3280,23 @@ async function runSingleSyncPass(): Promise<void> {
             6000
           ).catch(() => {});
         }
-        const mergedPeer = [...unsyncedPeer, ...data.peerExchanges];
+        const hydratedServerPeer = (data.peerExchanges as PeerExchangePost[]).map(sPost => {
+          const localMatch = currentPeer.find(l => l.id === sPost.id);
+          const nextReplies = Array.isArray(sPost.replies)
+            ? sPost.replies.map(sRep => {
+                const localRep = localMatch?.replies?.find(lr => lr.id === sRep.id);
+                if (localRep?.fileDataUrl && !sRep.fileDataUrl) {
+                  return { ...sRep, fileDataUrl: localRep.fileDataUrl };
+                }
+                return sRep;
+              })
+            : sPost.replies;
+          if (localMatch?.fileDataUrl && !sPost.fileDataUrl) {
+            return { ...sPost, fileDataUrl: localMatch.fileDataUrl, replies: nextReplies };
+          }
+          return nextReplies !== sPost.replies ? { ...sPost, replies: nextReplies } : sPost;
+        });
+        const mergedPeer = [...unsyncedPeer, ...hydratedServerPeer];
         const prevPeerStr = JSON.stringify(currentPeer.map(p => ({ id: p.id, thanks: p.thanksCount, reps: p.replies?.length })));
         const newPeerStr = JSON.stringify(mergedPeer.map(p => ({ id: p.id, thanks: p.thanksCount, reps: p.replies?.length })));
         if (prevPeerStr !== newPeerStr || !cachedPeerExchanges) {
@@ -3294,7 +3387,6 @@ async function runSingleSyncPass(): Promise<void> {
           window.dispatchEvent(new Event('auth-change'));
         }
       }
-      }
     }
   }
 
@@ -3308,7 +3400,8 @@ async function runSingleSyncPass(): Promise<void> {
       if (user.classId) query.set('classId', user.classId);
     }
     const notifsRes = await fetchWithTimeout(`/api/notifications?${query.toString()}`, {}, 10000);
-    if (notifsRes.ok) {
+    const notifsCt = notifsRes.headers.get('content-type') || '';
+    if (notifsRes.ok && notifsCt.includes('application/json')) {
       const serverNotifs: AppNotification[] = await notifsRes.json();
       if (Array.isArray(serverNotifs)) {
         const currentNotifs = getNotifications();
@@ -3337,7 +3430,8 @@ async function runSingleSyncPass(): Promise<void> {
 
       if (syncUrl) {
         const convSyncRes = await fetchWithTimeout(syncUrl, {}, 10000);
-        if (convSyncRes.ok) {
+        const convCt = convSyncRes.headers.get('content-type') || '';
+        if (convSyncRes.ok && convCt.includes('application/json')) {
           const convData = await convSyncRes.json();
           const serverConvs: PrivateConversation[] = convData.conversations || [];
           const serverMsgs: PrivateMessage[] = convData.messages || [];
@@ -3378,7 +3472,12 @@ async function runSingleSyncPass(): Promise<void> {
 async function checkServerHealthFallback(): Promise<boolean> {
   try {
     const res = await fetchWithTimeout('/api/health', {}, 6000);
-    return res.ok;
+    const contentType = res.headers.get('content-type') || '';
+    if (!res.ok || !contentType.includes('application/json')) {
+      return false;
+    }
+    const data = await res.json();
+    return Boolean(data && data.status === 'ok');
   } catch {
     return false;
   }
@@ -3418,6 +3517,8 @@ export async function syncWithServer(forceResync: boolean = false): Promise<void
         consecutiveSyncFailures = 0;
         lastSuccessfulSyncTime = Date.now();
         updateSyncStatus('connected');
+      } else if (isFirestoreLiveConnected()) {
+        updateSyncStatus('connected');
       } else {
         consecutiveSyncFailures += 1;
         if (
@@ -3432,7 +3533,10 @@ export async function syncWithServer(forceResync: boolean = false): Promise<void
       inFlightSyncPromise = null;
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         updateSyncStatus('offline');
-      } else if (consecutiveSyncFailures === 0 && lastSuccessfulSyncTime) {
+      } else if (
+        (consecutiveSyncFailures === 0 && lastSuccessfulSyncTime) ||
+        isFirestoreLiveConnected()
+      ) {
         updateSyncStatus('connected');
       } else if (consecutiveSyncFailures >= 2) {
         updateSyncStatus('offline');
@@ -3836,7 +3940,7 @@ export async function deleteSupervisedMessage(conversationId: string, messageId:
 
 // ================= تتبع المتصلين الآن في المنصة (التلاميذ والأساتذة) =================
 
-export const PRESENCE_ONLINE_WINDOW_MS = 120_000;
+export const PRESENCE_ONLINE_WINDOW_MS = 180_000;
 export const PRESENCE_LAST_ACTIVE_GRACE_MS = 30_000;
 
 let serverClockOffsetMs = 0;
@@ -3980,11 +4084,13 @@ export async function sendPresenceHeartbeat(user: UserProfile | null): Promise<v
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     cache: 'no-store',
+    credentials: 'same-origin',
     body: JSON.stringify(record),
     keepalive: true,
   })
     .then(async res => {
-      if (res.ok) {
+      const ct = res.headers.get('content-type') || '';
+      if (res.ok && ct.includes('application/json')) {
         try {
           const data = await res.json();
           if (typeof data?.serverTime === 'number') {
@@ -4026,6 +4132,7 @@ export function markUserOffline(identifier?: string, useBeacon = false): void {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     cache: 'no-store',
+    credentials: 'same-origin',
     body: JSON.stringify({ identifier }),
     keepalive: true,
   }).catch(() => {});
@@ -4071,8 +4178,9 @@ export function subscribeToLivePresence(
 
   const fetchServerPresence = async () => {
     try {
-      const res = await fetch('/api/presence', { cache: 'no-store' });
-      if (!res.ok) return;
+      const res = await fetch('/api/presence', { cache: 'no-store', credentials: 'same-origin' });
+      const ct = res.headers.get('content-type') || '';
+      if (!res.ok || !ct.includes('application/json')) return;
       const data = await res.json();
       if (Array.isArray(data?.records)) {
         const now = Date.now();
@@ -4096,6 +4204,7 @@ export function subscribeToLivePresence(
   let unsubFirestore: (() => void) | null = null;
   try {
     unsubFirestore = initPresenceRealtimeSync(records => {
+      markFirestoreConnected();
       const now = Date.now();
       firestoreRecords = records.map(rec => ({
         ...rec,

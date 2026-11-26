@@ -21,6 +21,13 @@
     <script>
       if ('serviceWorker' in navigator && window.location.protocol.startsWith('http')) {
         window.addEventListener('load', () => {
+          const hadController = Boolean(navigator.serviceWorker.controller);
+          let swReloading = false;
+          navigator.serviceWorker.addEventListener('controllerchange', () => {
+            if (!hadController || swReloading) return;
+            swReloading = true;
+            window.location.reload();
+          });
           navigator.serviceWorker
             .register('/sw.js', { updateViaCache: 'none' })
             .then((reg) => {
